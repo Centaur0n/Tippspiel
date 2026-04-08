@@ -200,7 +200,12 @@ function TippsPage({ player, phaseId }) {
   //////////////////////////////////////////
   const koMatches = matches
     .filter((m) => m.stage === "ko")
-    .sort((a, b) => a.stage_order - b.stage_order);
+    .sort((a, b) => {
+      if (a.stage_order !== b.stage_order) {
+        return a.stage_order - b.stage_order;
+      }
+      return a.ko_order - b.ko_order; // 🔥 DAS IST ENTSCHEIDEND
+    });
 
   const isRealMatch = (match) => {
     return match.stage_order === PHASE_ID;
@@ -211,6 +216,12 @@ function TippsPage({ player, phaseId }) {
       if (!koByRound[m.stage_order]) koByRound[m.stage_order] = [];
       koByRound[m.stage_order].push(m);
     });
+
+    
+// 🔥 HIER EINFÜGEN
+Object.keys(koByRound).forEach((round) => {
+  koByRound[round].sort((a, b) => a.ko_order - b.ko_order);
+});
 
     // 🔥 NEU: Finale immer nach oben
     Object.keys(koByRound).forEach((round) => {
@@ -295,9 +306,9 @@ function TippsPage({ player, phaseId }) {
     const KO_NEXT = {
       // Achtelfinale
       2: [
-        [1, 2],
-        [0, 3],
-        [4, 5],
+        [1, 4],
+        [0, 2],
+        [3, 5],
         [6, 7],
         [10, 11],
         [8, 9],
@@ -327,7 +338,9 @@ function TippsPage({ player, phaseId }) {
 
     function getTeamFromPrevious(roundIndex, matchIndex, side) {
       const mapping = KO_NEXT[roundIndex + 1];
-      const currentRound = Number(Object.keys(koByRound)[roundIndex]);
+
+      const rounds = Object.keys(koByRound).sort((a, b) => Number(a) - Number(b));
+      const currentRound = Number(rounds[roundIndex]);
       const prevRound = koByRound[currentRound - 1];
 
       if (!mapping || !prevRound) return "?";
@@ -344,8 +357,6 @@ function TippsPage({ player, phaseId }) {
       const winner = getWinner(sourceMatch.id);
       if (!winner) return "?";
 
-      const otherWinner = getWinner(prevRound[bIdx]?.id);
-      if (!winner || !otherWinner) return "?";
 
       return winner === 1
         ? sourceMatch.team_a
@@ -508,8 +519,10 @@ function TippsPage({ player, phaseId }) {
               }}
             >
 
-            {Object.keys(koByRound).map((round, roundIndex) => (
-              <div key={round} style={{ position: "relative" }}>                            
+            {Object.keys(koByRound)
+              .sort((a, b) => Number(a) - Number(b))
+              .map((round, roundIndex) => (
+                <div key={round} style={{ position: "relative" }}>                            
 
                 {koByRound[round].map((m, matchIndex) => {
                   const tip = tips[m.id];
@@ -571,7 +584,7 @@ function TippsPage({ player, phaseId }) {
                             {tip.goals_a !== null && tip.goals_b !== null
                               ? `${tip.goals_a} : ${tip.goals_b}`
                               : ""}
-                            {tip.winner && ` (${tip.winner === "1" ? teamA : teamB})`}
+                            {tip.winner && ` (${Number(tip.winner) === 1 ? teamA : teamB})`}
                           </div>
                         ) : !phase?.is_submitted ? (
                           roundIndex === 0 ? (
