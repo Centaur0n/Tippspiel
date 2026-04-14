@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from "react";
 import { supabase } from "./supabaseClient";
+import { getBestThirds } from "./Utils/calcTable";
 
 
 //////////////////////////////////////////
@@ -22,6 +23,7 @@ function TippsPage({ player, phaseId }) {
     fetchMatches();
     fetchTips();
     fetchPhase();
+
   }, [PHASE_ID]);
 
   useEffect(() => {
@@ -143,14 +145,24 @@ function TippsPage({ player, phaseId }) {
     groupResults[group] = table.map(t => t.team);
   });
 
-  const thirdPlaces = Object.entries(groupResults).map(([group, teams]) => ({
-    group,
-    team: teams[2],
-  }));
+  // Alle Gruppentabellen berechnen
+  const allGroupTables = Object.keys(grouped).map((groupName) => {
+    const table = calculateTable(grouped[groupName], tips);
+    groupResults[groupName] = table.map(t => t.team);
+    
+    // Wir geben ein Objekt zurück, das getBestThirds versteht
+    return {
+      id: groupName,
+      teams: table // Das sind die sortierten Teams dieser Gruppe
+    };
+  });
+
+  // 🔥 SCHRITT 3: Nutze die neue Logik für die Top 8 Drittplatzierten
+  const topEightThirds = getBestThirds(allGroupTables);
 
   const context = {
     groups: groupResults,
-    thirdPlaces,
+    thirdPlaces: topEightThirds, // Hier sind jetzt nur noch die besten 8 drin!
   };
 
   //////////////////////////////////////////
