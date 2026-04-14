@@ -288,7 +288,7 @@ function App() {
 
   return (
     <div style={{ padding: "20px", fontFamily: "sans-serif" }}>
-      <h1>🏆 EM 2024 Tippspiel</h1>
+      <h1>🏆 WM 2026 Tippspiel</h1>
 
       {!loggedIn ? (
         <div style={{ maxWidth: "300px" }}>
