@@ -1,5 +1,5 @@
 import React from 'react';
-import TipInput from './TipInput'; // Pfad anpassen, falls nötig
+import TipInput from './TipInput'; 
 
 const GroupTable = ({ 
   groupName, 
@@ -16,26 +16,50 @@ const GroupTable = ({
         display: "flex",
         gap: "40px",
         alignItems: "flex-start",
-        marginBottom: "40px"
+        marginBottom: "60px", // Etwas mehr Abstand zwischen den Gruppen
+        fontFamily: "sans-serif"
       }}
     >
       {/* 🔵 LINKS → Spiele */}
-      <div style={{ width: "250px" }}>
-        <h3>{groupName}</h3>
-
-        {!isSubmitted && (
-          <button onClick={() => onDeleteTips(groupName)}>
-            Zurücksetzen
-          </button>
-        )}
+      <div style={{ width: "280px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "15px" }}>
+          <h3 style={{ margin: 0, color: "#333" }}>{groupName}</h3>
+          {!isSubmitted && (
+            <button 
+              onClick={() => onDeleteTips(groupName)}
+              style={{
+                padding: "4px 8px",
+                fontSize: "0.75em",
+                backgroundColor: "#fff",
+                border: "1px solid #ccc",
+                borderRadius: "4px",
+                cursor: "pointer",
+                color: "#666"
+              }}
+            >
+              Reset
+            </button>
+          )}
+        </div>
 
         {matches.map((m) => {
           const tip = tips[m.id];
           return (
-            <div key={m.id} style={{ marginBottom: "10px" }}>
-              {m.team_a} vs {m.team_b}
+            <div key={m.id} style={{ 
+              marginBottom: "12px", 
+              padding: "8px", 
+              backgroundColor: "#f8f9fa", 
+              borderRadius: "6px",
+              fontSize: "0.9em",
+              border: "1px solid #edf2f7"
+            }}>
+              <div style={{ fontWeight: "600", marginBottom: "4px" }}>
+                {m.team_a} vs {m.team_b}
+              </div>
               {tip ? (
-                <div>{tip.goals_a} : {tip.goals_b}</div>
+                <div style={{ color: "#1a73e8", fontWeight: "bold", fontSize: "1.1em" }}>
+                  {tip.goals_a} : {tip.goals_b}
+                </div>
               ) : (
                 !isSubmitted && (
                   <TipInput
@@ -50,34 +74,73 @@ const GroupTable = ({
       </div>
 
       {/* 🟢 RECHTS → Tabelle */}
-      <div style={{ marginTop: "60px" }}>
-        <table border="1" style={{ borderCollapse: 'collapse' }}>
+      <div style={{ marginTop: "48px", flex: 1 }}>
+        <table style={{ 
+          width: "100%", 
+          borderCollapse: "collapse",
+          boxShadow: "0 2px 8px rgba(0,0,0,0.05)",
+          backgroundColor: "#fff"
+        }}>
           <thead>
-            <tr>
-              <th>Platz</th>
-              <th>Team</th>
-              <th>Pkt</th>
-              <th>Tore</th>
-              <th>GT</th>
-              <th>Diff</th>
+            <tr style={{ backgroundColor: "#1a73e8", color: "#ffffff", textAlign: "left" }}>
+              <th style={thStyle}>#</th>
+              <th style={thStyle}>Team</th>
+              <th style={thCenterStyle}>Pkt</th>
+              <th style={thCenterStyle}>Tore</th>
+              <th style={thCenterStyle}>GT</th>
+              <th style={thCenterStyle}>Diff</th>
             </tr>
           </thead>
           <tbody>
-            {tableData.map((row, index) => (
-              <tr key={row.team}>
-                <td>{index + 1}</td>
-                <td>{row.team}</td>
-                <td>{row.points}</td>
-                <td>{row.goals}</td>
-                <td>{row.conceded}</td>
-                <td>{row.diff}</td>
-              </tr>
-            ))}
+            {tableData.map((row, index) => {
+              // Markierung für Platz 1 & 2 (Qualifiziert)
+              const isQualified = index < 2;
+              
+              return (
+                <tr key={row.team} style={{ 
+                  borderBottom: "1px solid #edf2f7",
+                  backgroundColor: isQualified ? "#f0fff4" : "#ffffff"
+                }}>
+                  <td style={{ ...tdStyle, color: "#718096", width: "30px" }}>{index + 1}.</td>
+                  <td style={{ ...tdStyle, fontWeight: isQualified ? "600" : "400", color: "#2d3748" }}>
+                    {row.team}
+                  </td>
+                  <td style={{ ...tdCenterStyle, fontWeight: "bold", color: "#000" }}>{row.points}</td>
+                  <td style={tdCenterStyle}>{row.goals}</td>
+                  <td style={tdCenterStyle}>{row.conceded}</td>
+                  <td style={{ 
+                    ...tdCenterStyle, 
+                    color: row.diff < 0 ? "#e53e3e" : "#2d3748",
+                    fontWeight: row.diff !== 0 ? "600" : "400"
+                  }}>
+                    {row.diff > 0 ? `+${row.diff}` : row.diff}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
     </div>
   );
 };
+
+// Styles passend zur Rangliste der Dritten
+const thStyle = { 
+  padding: "12px 10px", 
+  fontWeight: "600",
+  fontSize: "0.85em",
+  textTransform: "uppercase",
+  letterSpacing: "0.05em"
+};
+
+const thCenterStyle = { ...thStyle, textAlign: "center" };
+
+const tdStyle = { 
+  padding: "10px 10px", 
+  fontSize: "0.9em"
+};
+
+const tdCenterStyle = { ...tdStyle, textAlign: "center" };
 
 export default GroupTable;

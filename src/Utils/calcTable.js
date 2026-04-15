@@ -5,12 +5,25 @@
  * @param {Array} allGroups - Array aller 12 Gruppentabellen
  * @param {Object} adminOverrides - Deine manuellen Korrekturen (Fairplay)
  */
-export const getBestThirds = (allGroups, adminOverrides = {}) => {
-  // Wir holen von jeder der 12 Gruppen das Team auf Platz 3 (Index 2)
-  const thirds = allGroups.map(group => {
-    const team = group.teams[2]; 
-    return { ...team, groupId: group.id };
-  });
+export function getBestThirds(allGroups, adminOverrides = {}) {
+  // 1. Von jeder Gruppe nur das Team auf Platz 3 holen
+  const thirds = allGroups.map((group) => {
+    // Das Team auf Index 2 ist der 3. Platz (0, 1, 2...)
+    const thirdPlaceTeam = group.teams[2]; 
+
+    if (!thirdPlaceTeam) return null;
+
+    return {
+      team: thirdPlaceTeam.team,
+      points: thirdPlaceTeam.points,
+      goals: thirdPlaceTeam.goals,
+      conceded: thirdPlaceTeam.conceded,
+      diff: thirdPlaceTeam.diff,
+      group: group.id // Damit wir wissen, aus welcher Gruppe sie kommen
+    };
+  }).filter(Boolean); // Entfernt null-Werte, falls eine Gruppe < 3 Teams hat
+
+
 
   // Sortierung nach deinen Kriterien
   return thirds.sort((a, b) => {

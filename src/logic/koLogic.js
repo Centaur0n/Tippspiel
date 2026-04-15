@@ -1,3 +1,6 @@
+import { getThirdPlaceForSlot } from './thirdPlaceMapping'; // Pfad anpassen!
+
+
 /**
  * Berechnet die vertikale Position eines Spiels im Baum
  */
@@ -11,17 +14,30 @@ export const getTopPosition = (roundIndex, matchIndex, treeHeight, currentBaseSp
 /**
  * Ermittelt, welches Team in einem Slot (z.B. "A1") steht
  */
+
 export function resolveSlot(slot, context) {
   const { groups, thirdPlaces } = context;
+
+  // 1. Logik für Gruppensieger und Zweite (z.B. "A1", "B2")
   if (/^[A-Z][12]$/.test(slot)) {
-    const group = slot[0]; const pos = Number(slot[1]) - 1;
-    return groups[group]?.[pos] || "?";
+    const groupLetter = slot[0]; 
+    const position = Number(slot[1]) - 1; // 0 für 1. Platz, 1 für 2. Platz
+    
+    // Holt das Team aus dem groups-Objekt (z.B. groups["A"][0])
+    return groups[groupLetter]?.[position] || "?";
   }
-  if (slot.startsWith("3")) {
-    const allowedGroups = slot.slice(1).split("");
-    const candidates = thirdPlaces.filter(t => allowedGroups.includes(t.group));
-    return candidates[0]?.team || "?";
+
+  // 2. DIE NEUE LOGIK FÜR DIE DRITTPLATZIERTEN (Slots wie "1A", "1B" etc.)
+  // Wir prüfen, ob der Slot einer der definierten Slots für Dritte ist
+  const thirdPlaceSlots = ["1A", "1B", "1D", "1E", "1G", "1I", "1K", "1L"];
+  
+  if (thirdPlaceSlots.includes(slot)) {
+    // Hier rufen wir deine 495er-Mapping-Funktion auf
+    // thirdPlaces muss das Array mit den 8 besten Dritten sein
+    return getThirdPlaceForSlot(slot, thirdPlaces);
   }
+
+  // Fallback für alte Slots oder Platzhalter
   return slot;
 }
 

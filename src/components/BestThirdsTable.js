@@ -1,48 +1,71 @@
 import React from 'react';
 
-const BestThirdsTable = ({ teams }) => {
-  // Wir nehmen an, 'teams' sind bereits die Drittplatzierten aus allen Gruppen
-  // Falls nicht bereits sortiert, sortieren wir hier nochmal zur Sicherheit
+function BestThirdsTable({ teams }) {
+  if (!teams || teams.length === 0) return null;
+
+  // 1. Sortierung fixen: Punkte -> Differenz -> Erzielte Tore
   const sortedThirds = [...teams].sort((a, b) => {
-    if (b.points !== a.points) return b.points - a.points;
-    if (b.goalDiff !== a.goalDiff) return b.goalDiff - a.goalDiff;
-    if (b.goalsFor !== a.goalsFor) return b.goalsFor - a.goalsFor;
-    return 0;
-  });
+    const diffA = a.goalDiff !== undefined ? a.goalDiff : a.diff;
+    const diffB = b.goalDiff !== undefined ? b.goalDiff : b.diff;
+    const goalsA = a.goalsFor !== undefined ? a.goalsFor : a.goals;
+    const goalsB = b.goalsFor !== undefined ? b.goalsFor : b.goals;
+
+    return (
+      b.points - a.points || 
+      diffB - diffA || 
+      goalsB - goalsA
+    );
+  }).slice(0, 12);
 
   return (
-    <div style={{ marginTop: "40px", padding: "15px", backgroundColor: "#fff", border: "2px solid #333", borderRadius: "8px" }}>
-      <h3 style={{ marginTop: 0 }}>Rangliste der Gruppendritten</h3>
-      <p style={{ fontSize: "12px", color: "#666" }}>Die besten 8 kommen weiter</p>
+    <div style={{ marginTop: "40px", width: "100%", fontFamily: "sans-serif" }}>
+      <h3 style={{ marginBottom: "10px", color: "#333", fontSize: "1.2em" }}>
+        Rangliste der Gruppendritten
+      </h3>
       
-      <table border="1" style={{ width: "100%", borderCollapse: "collapse", textAlign: "left" }}>
+      <table style={{ 
+        width: "100%", 
+        borderCollapse: "collapse",
+        // Die blaue Umrandung wurde hier entfernt
+        boxShadow: "0 2px 8px rgba(0,0,0,0.05)" 
+      }}>
         <thead>
-          <tr style={{ backgroundColor: "#eee" }}>
-            <th>Platz</th>
-            <th>Gruppe</th>
-            <th>Team</th>
-            <th>Pkt</th>
-            <th>Diff</th>
-            <th>Tore</th>
+          <tr style={{ backgroundColor: "#6b94e7", color: "#ffffff", textAlign: "left" }}>
+            <th style={thStyle}>#</th>
+            <th style={thCenterStyle}>Grp</th>
+            <th style={thStyle}>Team</th>
+            <th style={thCenterStyle}>Pkt</th>
+            <th style={thCenterStyle}>Diff</th>
+            <th style={thCenterStyle}>Tore</th>
           </tr>
         </thead>
         <tbody>
           {sortedThirds.map((team, index) => {
-            const isQualified = index < 8; // Die Top 8 markieren
+            const isQualified = index < 8;
+            
+            const displayDiff = team.goalDiff !== undefined ? team.goalDiff : team.diff;
+            const displayGoals = team.goalsFor !== undefined ? team.goalsFor : team.goals;
+            const displayName = team.name || team.team;
+            const displayGroup = team.groupId || team.group;
+
             return (
               <tr 
-                key={team.name} 
+                key={displayName + index} 
                 style={{ 
-                  backgroundColor: isQualified ? "#e6fffa" : "#fff5f5",
-                  fontWeight: isQualified ? "bold" : "normal"
+                  borderBottom: "1px solid #edf2f7",
+                  backgroundColor: isQualified ? "#f0fff4" : "#ffffff" // Sehr dezentes Grün
                 }}
               >
-                <td>{index + 1}.</td>
-                <td align="center">{team.groupId}</td>
-                <td>{team.name}</td>
-                <td align="center">{team.points}</td>
-                <td align="center">{team.goalDiff}</td>
-                <td align="center">{team.goalsFor}</td>
+                <td style={{ ...tdStyle, color: "#718096", width: "30px" }}>{index + 1}.</td>
+                <td style={{ ...tdCenterStyle, color: "#718096", width: "40px" }}>{displayGroup}</td>
+                <td style={{ ...tdStyle, fontWeight: isQualified ? "600" : "400", color: "#2d3748" }}>
+                  {displayName}
+                </td>
+                <td style={{ ...tdCenterStyle, fontWeight: "bold", color: "#000" }}>{team.points}</td>
+                <td style={{ ...tdCenterStyle, color: displayDiff < 0 ? "#e53e3e" : "#2d3748" }}>
+                  {displayDiff > 0 ? `+${displayDiff}` : displayDiff}
+                </td>
+                <td style={tdCenterStyle}>{displayGoals}</td>
               </tr>
             );
           })}
@@ -50,6 +73,24 @@ const BestThirdsTable = ({ teams }) => {
       </table>
     </div>
   );
+}
+
+// Styles für bessere Lesbarkeit und Abstände
+const thStyle = { 
+  padding: "12px 10px", 
+  fontWeight: "600",
+  fontSize: "0.9em",
+  textTransform: "uppercase",
+  letterSpacing: "0.05em"
 };
+
+const thCenterStyle = { ...thStyle, textAlign: "center" };
+
+const tdStyle = { 
+  padding: "10px 10px", 
+  fontSize: "0.95em"
+};
+
+const tdCenterStyle = { ...tdStyle, textAlign: "center" };
 
 export default BestThirdsTable;
