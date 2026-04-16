@@ -24,47 +24,39 @@ const KOBracket = ({
     5: "Finale"
   };
 
-  // Konstante Höhe für die Box, um Linien-Verschiebungen zu verhindern
+  // Mapping aller deiner Teams zu Ländercodes
+  const getCountryCode = (teamName) => {
+    const mapping = {
+      "Mexiko": "mx", "Südafrika": "za", "Südkorea": "kr", "Tschechien": "cz",
+      "Kanada": "ca", "Bosnien": "ba", "USA": "us", "Paraguay": "py",
+      "Katar": "qa", "Schweiz": "ch", "Brasilien": "br", "Marokko": "ma",
+      "Haiti": "ht", "Schottland": "gb-sct", "Australien": "au", "Türkei": "tr",
+      "Deutschland": "de", "Curaçao": "cw", "Niederlande": "nl", "Japan": "jp",
+      "Elfenbeinküste": "ci", "Ecuador": "ec", "Schweden": "se", "Tunesien": "tn",
+      "Spanien": "es", "Kap Verde": "cv", "Belgien": "be", "Ägypten": "eg",
+      "Saudi-Arabien": "sa", "Uruguay": "uy", "Iran": "ir", "Neuseeland": "nz",
+      "Frankreich": "fr", "Senegal": "sn", "Irak": "iq", "Norwegen": "no",
+      "Argentinien": "ar", "Algerien": "dz", "Österreich": "at", "Jordanien": "jo",
+      "Portugal": "pt", "Kongo": "cd", "England": "gb-eng", "Kroatien": "hr",
+      "Ghana": "gh", "Panama": "pa", "Usbekistan": "uz", "Kolumbien": "co"
+    };
+    return mapping[teamName] || null;
+  };
+
   const BOX_HEIGHT = 135; 
 
   return (
-    <div style={{ minWidth: "1400px", padding: "20px" }}>
+    <div style={{ minWidth: "1600px", padding: "20px" }}>
       
-      {/* 🔄 RESET-HEADER (Oben wie in der Gruppenphase) */}
-      <div style={{ display: "flex", marginBottom: "60px", marginLeft: "0px" }}>
+      {/* 🔄 RESET-HEADER (Stil wie Gruppenphase) */}
+      <div style={{ display: "flex", marginBottom: "60px" }}>
         {Object.keys(koByRound)
           .sort((a, b) => Number(a) - Number(b))
-          .map((round, idx) => (
-          <div
-            key={round}
-            style={{ 
-              width: "200px", 
-              marginRight: "60px", 
-              textAlign: "center",
-              display: "flex",
-              flexDirection: "column",
-              gap: "8px"
-            }}
-          >
-            <span style={{ fontWeight: "bold", fontSize: "1rem", color: "#2d3748" }}>
-              {safeRoundNames[round]}
-            </span>
+          .map((round) => (
+          <div key={round} style={{ width: "240px", marginRight: "60px", textAlign: "center", display: "flex", flexDirection: "column", gap: "8px" }}>
+            <span style={{ fontWeight: "bold", fontSize: "1rem", color: "#2d3748" }}>{safeRoundNames[round]}</span>
             {!phase?.is_submitted && (
-              <button 
-                onClick={() => deleteKORound(Number(round))}
-                style={{
-                  padding: "4px 8px",
-                  fontSize: "0.75rem",
-                  backgroundColor: "#fff",
-                  border: "1px solid #ccc",
-                  borderRadius: "4px",
-                  cursor: "pointer",
-                  color: "#666",
-                  transition: "all 0.2s"
-                }}
-                onMouseOver={(e) => e.target.style.backgroundColor = "#e2e8f0"}
-                onMouseOut={(e) => e.target.style.backgroundColor = "#edf2f7"}
-              >
+              <button onClick={() => deleteKORound(Number(round))} style={{ padding: "4px 8px", fontSize: "0.75rem", backgroundColor: "#fff", border: "1px solid #ccc", borderRadius: "4px", cursor: "pointer", color: "#666" }}>
                 Reset
               </button>
             )}
@@ -72,7 +64,6 @@ const KOBracket = ({
         ))}
       </div>
 
-      {/* 🔽 KO-BAUM AREA */}
       <div style={{ position: "relative", height: `${treeHeight / 2}px` }}>
         {Object.keys(koByRound)
           .sort((a, b) => Number(a) - Number(b))
@@ -93,76 +84,55 @@ const KOBracket = ({
                   teamB = getTeamFromPrevious(roundIndex, matchIndex, "B", koByRound, tips, context);
                 }
 
+                // Hilfsfunktion für die Team-Zeilen (macht den Code kürzer & sauberer)
+                const renderTeamRow = (teamName, isWinner, isFirst) => (
+                  <div style={{ 
+                    padding: "10px 12px", 
+                    display: "flex", 
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    background: isWinner ? "#f0fff4" : "transparent",
+                    borderBottom: isFirst ? "1px solid #f1f5f9" : "none",
+                    height: "40px"
+                  }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                      {teamName !== "?" ? (
+                        <div style={{ width: "22px", height: "16px", overflow: "hidden", borderRadius: "2px", border: "1px solid #eee", display: "flex", alignItems: "center" }}>
+                           <img 
+                            src={`https://flagcdn.com/w40/${getCountryCode(teamName)}.png`} 
+                            alt="" 
+                            style={{ width: "100%", height: "auto" }}
+                            onError={(e) => e.target.style.visibility = 'hidden'} 
+                           />
+                        </div>
+                      ) : (
+                        <div style={{ width: "22px", height: "16px", backgroundColor: "#f1f5f9", borderRadius: "2px" }} />
+                      )}
+                      <span style={{ fontSize: "0.85rem", fontWeight: isWinner ? "700" : "400", color: teamName === "?" ? "#cbd5e0" : "#1e293b" }}>
+                        {teamName}
+                      </span>
+                    </div>
+                    {isWinner && <span style={{ color: "#48bb78", fontWeight: "bold" }}>✓</span>}
+                  </div>
+                );
+
                 return (
-                  <div
-                    key={m.id}
-                    style={{
-                      position: "absolute",
-                      top: `${currentTop}px`,
-                      left: `${roundIndex * 260}px`,
-                      transition: "all 0.3s ease",
-                      height: `${BOX_HEIGHT}px`
-                    }}
-                  >
-                    {/* UNTERTITEL ÜBER BOX */}
-                    <div style={{
-                      fontSize: "0.65rem",
-                      fontWeight: "800",
-                      color: "#cbd5e0",
-                      textTransform: "uppercase",
-                      marginBottom: "4px",
-                      letterSpacing: "0.05em"
-                    }}>
-                      {/* Zeigt jetzt wieder z.B. "ACHTELFINALE 1" an */}
+                  <div key={m.id} style={{ position: "absolute", top: `${currentTop}px`, left: `${roundIndex * 300}px`, height: `${BOX_HEIGHT}px` }}>
+                    {/* Überschrift über dem Match */}
+                    <div style={{ fontSize: "0.65rem", fontWeight: "800", color: "#cbd5e0", textTransform: "uppercase", marginBottom: "4px", letterSpacing: "0.05em" }}>
                       {safeRoundNames[round]} {matchIndex + 1}
                     </div>
 
-                    {/* MATCH BOX MIT FIXER HÖHE */}
-                    <div style={{
-                      width: "200px",
-                      height: "110px", // Festgelegt, damit Linien mittig bleiben
-                      background: "#fff",
-                      borderRadius: "10px",
-                      boxShadow: "0 4px 12px rgba(0,0,0,0.05)",
-                      border: "1px solid #e2e8f0",
-                      display: "flex",
-                      flexDirection: "column",
-                      justifyContent: "space-between",
-                      overflow: "hidden"
-                    }}>
-                      {/* Team A */}
-                      <div style={{ 
-                        padding: "10px 12px", 
-                        borderBottom: "1px solid #f1f5f9",
-                        display: "flex",
-                        justifyContent: "space-between",
-                        background: tip?.winner === "1" ? "#f0fff4" : "transparent" 
-                      }}>
-                        <span style={{ fontSize: "0.85rem", fontWeight: tip?.winner === "1" ? "700" : "400" }}>{teamA}</span>
-                        {tip?.winner === "1" && <span style={{ color: "#48bb78" }}>✓</span>}
-                      </div>
+                    {/* MATCH BOX */}
+                    <div style={{ width: "240px", height: "115px", background: "#fff", borderRadius: "10px", boxShadow: "0 4px 12px rgba(0,0,0,0.05)", border: "1px solid #e2e8f0", display: "flex", flexDirection: "column", justifyContent: "space-between", overflow: "hidden" }}>
+                      {renderTeamRow(teamA, tip?.winner === "1", true)}
+                      {renderTeamRow(teamB, tip?.winner === "2", false)}
 
-                      {/* Team B */}
-                      <div style={{ 
-                        padding: "10px 12px", 
-                        display: "flex",
-                        justifyContent: "space-between",
-                        background: tip?.winner === "2" ? "#f0fff4" : "transparent"
-                      }}>
-                        <span style={{ fontSize: "0.85rem", fontWeight: tip?.winner === "2" ? "700" : "400" }}>{teamB}</span>
-                        {tip?.winner === "2" && <span style={{ color: "#48bb78" }}>✓</span>}
-                      </div>
-
-                      {/* Footer / Selector */}
-                      <div style={{ padding: "6px 10px", background: "#f8fafc", borderTop: "1px solid #e2e8f0", height: "34px" }}>
+                      <div style={{ padding: "6px 10px", background: "#f8fafc", borderTop: "1px solid #e2e8f0", height: "35px" }}>
                         {!phase?.is_submitted ? (
                           (teamA !== "?" && teamB !== "?") ? (
-                            <select 
-                              value={tip?.winner || ""} 
-                              onChange={(e) => saveTip(m.id, null, null, e.target.value)}
-                              style={{ width: "100%", fontSize: "0.7rem", padding: "2px" }}
-                            >
-                              <option value="">Sieger...</option>
+                            <select value={tip?.winner || ""} onChange={(e) => saveTip(m.id, null, null, e.target.value)} style={{ width: "100%", fontSize: "0.7rem", padding: "2px" }}>
+                              <option value="">Sieger wählen...</option>
                               <option value="1">{teamA}</option>
                               <option value="2">{teamB}</option>
                             </select>
@@ -170,46 +140,21 @@ const KOBracket = ({
                             <div style={{ fontSize: "0.65rem", color: "#94a3b8", textAlign: "center", marginTop: "4px" }}>Warten...</div>
                           )
                         ) : (
-                          <div style={{ fontSize: "0.75rem", textAlign: "center", fontWeight: "bold" }}>
+                          <div style={{ fontSize: "0.75rem", textAlign: "center", fontWeight: "bold", color: "#475569" }}>
                             {tip?.winner ? (Number(tip.winner) === 1 ? teamA : teamB) : "-"}
                           </div>
                         )}
                       </div>
                     </div>
 
-                    {/* 🛠️ LINIEN-FIX: Die Linien nutzen jetzt BOX_HEIGHT / 2 für perfekte Zentrierung */}
+                    {/* LINIEN-LOGIK (Fixiert auf 82px) */}
                     {roundIndex < Object.keys(koByRound).length - 1 && (
                       <>
-                        {/* Horizontale Linie aus der Box raus */}
-                        <div style={{ 
-                          position: "absolute", 
-                          top: "75px", // Exakte Mitte der Matchbox inkl. Titel-Offset
-                          right: "-30px", 
-                          width: "30px", 
-                          height: "2px", 
-                          background: "#cbd5e0" 
-                        }} />
-                        
+                        <div style={{ position: "absolute", top: "82px", right: "-30px", width: "30px", height: "2px", background: "#cbd5e0" }} />
                         {matchIndex % 2 === 0 && (
                           <>
-                            {/* Vertikale Verbindungslinie */}
-                            <div style={{ 
-                              position: "absolute", 
-                              top: "75px", 
-                              right: "-30px", 
-                              width: "2px", 
-                              height: `${baseSpacing * Math.pow(2, roundIndex)}px`, 
-                              background: "#cbd5e0" 
-                            }} />
-                            {/* Horizontale Linie in die nächste Box rein */}
-                            <div style={{ 
-                              position: "absolute", 
-                              top: `calc(${nextTop - currentTop}px + 75px)`, 
-                              right: "-60px", 
-                              width: "30px", 
-                              height: "2px", 
-                              background: "#cbd5e0" 
-                            }} />
+                            <div style={{ position: "absolute", top: "82px", right: "-30px", width: "2px", height: `${baseSpacing * Math.pow(2, roundIndex)}px`, background: "#cbd5e0" }} />
+                            <div style={{ position: "absolute", top: `calc(${nextTop - currentTop}px + 82px)`, right: "-60px", width: "30px", height: "2px", background: "#cbd5e0" }} />
                           </>
                         )}
                       </>
