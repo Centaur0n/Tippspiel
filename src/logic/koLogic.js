@@ -68,24 +68,42 @@ export function getTeamFromPrevious(roundIndex, matchIndex, side, koByRound, tip
 
   if (!prevRound) return "?";
 
-  // Welches Spiel aus der Vorrunde liefert das Team?
-  const sourceMatchIndex = side === "A" ? matchIndex * 2 : matchIndex * 2 + 1;
-  const sourceMatch = prevRound[sourceMatchIndex];
+  // --- FIX 1: SOURCE MATCH INDEX ---
+  // Da beide Finalspiele (Finale & Platz 3) dieselben Quellen (Halbfinals) nutzen,
+  // müssen wir den Index für die Finalrunde "normalisieren".
+  let sourceMatchIndex;
+  if (roundIndex === 4) {
+    // Sowohl Match 0 (Finale) als auch Match 1 (Platz 3) greifen auf 
+    // die Halbfinals 0 und 1 zu.
+    sourceMatchIndex = side === "A" ? 0 : 1;
+  } else {
+    // Normaler Baumverlauf für alle anderen Runden
+    sourceMatchIndex = side === "A" ? matchIndex * 2 : matchIndex * 2 + 1;
+  }
 
+  const sourceMatch = prevRound[sourceMatchIndex];
   if (!sourceMatch) return "?";
 
-  // Wer hat laut den Tipps gewonnen?
   const tip = tips[sourceMatch.id];
   const winner = tip ? Number(tip.winner) : null;
 
-  // --- ÄNDERUNG 1: Zeige "?" wenn noch kein Sieger feststeht ---
-  if (!winner) {
-    return "?"; 
+  if (!winner) return "?";
+
+  // --- FIX 2: GEWINNER/VERLIERER TAUSCH ---
+  // Jetzt, wo Finale = 0 und Platz 3 = 1 ist:
+  const isThirdPlaceMatch = (roundIndex === 4 && matchIndex === 1);
+  
+  let effectiveWinnerSide;
+  if (isThirdPlaceMatch) {
+    // Spiel um Platz 3 (Index 1): Nimm den VERLIERER
+    effectiveWinnerSide = winner === 1 ? "B" : "A";
+  } else {
+    // Finale (Index 0) und Rest: Nimm den GEWINNER
+    effectiveWinnerSide = winner === 1 ? "A" : "B";
   }
 
-  // --- ÄNDERUNG 2: Logik für die Weitergabe ---
+  // --- WEITERGABE ---
   if (roundIndex === 1) {
-    // 16tel -> 8tel: Hier müssen wir über resolveSlot gehen (wie bisher)
     const KO_STRUCTURE = {
       round16: [
         ["E1", "1E"], ["I1", "1I"], ["F1", "C2"], ["B2", "A2"],
@@ -95,22 +113,13 @@ export function getTeamFromPrevious(roundIndex, matchIndex, side, koByRound, tip
       ]
     };
     const pairing = KO_STRUCTURE.round16[sourceMatchIndex];
-    const slotCode = winner === 1 ? pairing[0] : pairing[1];
+    const slotCode = effectiveWinnerSide === "A" ? pairing[0] : pairing[1];
     return resolveSlot(slotCode, context);
   } else {
-    // 8tel -> 4tel -> Halbfinale -> Finale:
-    // Hier ziehen wir den Namen direkt aus dem Sieger-Tipp des Vorrunden-Spiels.
-    // Wir schauen, welches Team im sourceMatch gewonnen hat.
-    
-    // Da wir im 8tel-Finale bereits die echten Namen ("Deutschland") im Baum stehen haben,
-    // müssen wir sicherstellen, dass wir genau diesen Namen weitergeben.
-    
-    // Wir rufen getTeamFromPrevious REKURSIV für die Vorrunde auf, 
-    // um den echten Namen des Siegers zu erhalten:
     return getTeamFromPrevious(
         roundIndex - 1, 
         sourceMatchIndex, 
-        winner === 1 ? "A" : "B", 
+        effectiveWinnerSide, 
         koByRound, 
         tips, 
         context

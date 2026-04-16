@@ -119,7 +119,10 @@ const KOBracket = ({
                   <div key={m.id} style={{ position: "absolute", top: `${currentTop}px`, left: `${roundIndex * 300}px`, height: `${BOX_HEIGHT}px` }}>
                     {/* Überschrift über dem Match */}
                     <div style={{ fontSize: "0.65rem", fontWeight: "1000", color: "#878b8e", textTransform: "uppercase", marginBottom: "4px", letterSpacing: "0.05em" }}>
-                      {safeRoundNames[round]} {matchIndex + 1}
+                      {roundIndex === 4 
+                        ? (matchIndex === 1 ? "Spiel um Platz 3" : "Finale") 
+                        : `${safeRoundNames[round]} ${matchIndex + 1}`
+                      }
                     </div>
 
                     {/* MATCH BOX */}

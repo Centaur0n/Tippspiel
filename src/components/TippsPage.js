@@ -95,14 +95,40 @@ function TippsPage({ player, phaseId, context }) {
   }
 
   async function deleteGroupTips(groupName) {
-    const ids = matches.filter((m) => m.group_name === groupName).map((m) => m.id);
-    await supabase.from("tip").delete().in("match_id", ids).eq("player_id", player.id).eq("phase_id", phaseId);
+    // 1. IDs der Gruppenspiele
+    const groupMatchIds = matches
+      .filter((m) => m.group_name === groupName)
+      .map((m) => m.id);
+
+    // 2. IDs ALLER KO-Phasen (da Phase 1 alles danach beeinflusst)
+    // Wir löschen Phase 2, 3, 4, 5 (oder alle stage === "ko")
+    const koMatchIds = matches
+      .filter((m) => m.stage === "ko")
+      .map((m) => m.id);
+
+    const allToDelete = [...groupMatchIds, ...koMatchIds];
+
+    await supabase
+      .from("tip")
+      .delete()
+      .in("match_id", allToDelete)
+      .eq("player_id", player.id);
+
     fetchTips();
   }
-
+  
   async function deleteKORound(stageOrder) {
-    const ids = matches.filter((m) => m.stage === "ko" && m.stage_order === stageOrder).map((m) => m.id);
-    await supabase.from("tip").delete().in("match_id", ids).eq("player_id", player.id).eq("phase_id", phaseId);
+    // Finde alle Spiele, die die aktuelle stageOrder ODER HÖHER haben
+    const ids = matches
+      .filter((m) => m.stage === "ko" && m.stage_order >= stageOrder)
+      .map((m) => m.id);
+
+    await supabase
+      .from("tip")
+      .delete()
+      .in("match_id", ids)
+      .eq("player_id", player.id);
+
     fetchTips();
   }
 
