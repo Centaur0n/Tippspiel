@@ -1,7 +1,6 @@
-
 export const POINTS_CONFIG = {
   // Reale Spiele
-  MATCH_BASE_DYNAMIC: [3, 4, 5], // Favorit, Normal, Underdog
+  MATCH_BASE_DYNAMIC: [3, 4, 5], 
   MATCH_DIFF: 2,
   MATCH_GOALS_SINGLE: 1,
   MATCH_GOALS_SUM: 1,
@@ -12,7 +11,7 @@ export const POINTS_CONFIG = {
   // Prognosen / Finalrunde
   PROG_REACH_16: 5,
   PROG_OUT_16: 5,
-  PROG_REACH_8: 5, // Analog zu 16tel
+  PROG_REACH_8: 5,
   PROG_OUT_8: 5,
   PROG_REACH_4: 10,
   PROG_OUT_4: 5,
@@ -28,69 +27,78 @@ export const POINTS_CONFIG = {
   PROG_OUT_VORRUNDE: 2,
   PROG_TABLE_POS: 2,
 
-  // Korrekturdivisoren (Phase ID -> Divisor)
+  // Korrekturdivisoren
   DIVISORS: {
-    1: 1, // Phase 1: Vor Turnier
-    2: 1, // Phase 2: Vor 16tel Finale
-    3: 2, // Phase 3: Vor 8tel Finale
-    4: 4, // Phase 4: Vor 4tel Finale
-    5: 8  // Phase 5: Vor Halbfinale
+    1: 1, 2: 1, 3: 2, 4: 4, 5: 8
   }
 };
 
 /**
- * Berechnet Punkte für ein reales Spielergebnis
+ * BERECHNET DETAILLIERTE PUNKTE FÜR EIN SPIEL
+ * Gibt ein Objekt mit Summe und Aufschlüsselung zurück.
  */
-export const calculateMatchPoints = (tip, actual, winnerPoints) => {
-  if (!tip || actual.goals_a === null) return 0;
+export const calculateDetailedMatchPoints = (tip, actual, winnerPoints) => {
+  // Initialer Breakdown für die Statistik
+  const breakdown = {
+    winner: 0,
+    diff: 0,
+    goals_a: 0,
+    goals_b: 0,
+    sum: 0,
+    exact_bonus: 0
+  };
 
-  let points = 0;
+  if (!tip || actual.goals_a === null || actual.goals_a === undefined) {
+    return { total: 0, breakdown };
+  }
+
   const tA = Number(tip.goals_a);
   const tB = Number(tip.goals_b);
   const aA = Number(actual.goals_a);
   const aB = Number(actual.goals_b);
 
-  // 1. Richtiger Sieger (Dynamisch 3, 4 oder 5)
-  const tipWinner = tA > tB ? "1" : tA < tB ? "2" : tip.winner;
-  const actualWinner = aA > aB ? "1" : aA < aB ? "2" : actual.winner;
+  // 1. Richtiger Sieger (Tendenz)
+  const tipWinner = tA > tB ? "1" : tA < tB ? "2" : String(tip.winner);
+  const actualWinner = aA > aB ? "1" : aA < aB ? "2" : String(actual.winner);
   
-  if (tipWinner === actualWinner) points += winnerPoints;
+  if (tipWinner === actualWinner && tipWinner !== "0") {
+    breakdown.winner = winnerPoints;
+  }
 
   // 2. Tordifferenz
-  if ((tA - tB) === (aA - aB)) points += POINTS_CONFIG.MATCH_DIFF;
+  if ((tA - tB) === (aA - aB)) {
+    breakdown.diff = POINTS_CONFIG.MATCH_DIFF;
+  }
 
   // 3. Einzelne Tore
-  if (tA === aA) points += POINTS_CONFIG.MATCH_GOALS_SINGLE;
-  if (tB === aB) points += POINTS_CONFIG.MATCH_GOALS_SINGLE;
+  if (tA === aA) breakdown.goals_a = POINTS_CONFIG.MATCH_GOALS_SINGLE;
+  if (tB === aB) breakdown.goals_b = POINTS_CONFIG.MATCH_GOALS_SINGLE;
 
   // 4. Gesamtsumme Tore
-  if ((tA + tB) === (aA + aB)) points += POINTS_CONFIG.MATCH_GOALS_SUM;
+  if ((tA + tB) === (aA + aB)) {
+    breakdown.sum = POINTS_CONFIG.MATCH_GOALS_SUM;
+  }
 
   // 5. Bonus für komplett richtiges Ergebnis
   if (tA === aA && tB === aB) {
-    const sum = aA + aB;
-    if (sum <= 3) points += POINTS_CONFIG.BONUS_EXACT_LOW;
-    else if (sum <= 6) points += POINTS_CONFIG.BONUS_EXACT_MID;
-    else points += POINTS_CONFIG.BONUS_EXACT_HIGH;
+    const totalGoals = aA + aB;
+    if (totalGoals <= 3) breakdown.exact_bonus = POINTS_CONFIG.BONUS_EXACT_LOW;
+    else if (totalGoals <= 6) breakdown.exact_bonus = POINTS_CONFIG.BONUS_EXACT_MID;
+    else breakdown.exact_bonus = POINTS_CONFIG.BONUS_EXACT_HIGH;
   }
 
-  return points;
+  // Gesamtsumme berechnen
+  const total = Object.values(breakdown).reduce((acc, val) => acc + val, 0);
+
+  return { total, breakdown };
 };
 
 /**
- * Berechnet Punkte für eine Prognose unter Berücksichtigung des Zeitpunkts (Phase)
- */
-export const calculatePrognosisPoints = (basePoints, phaseId) => {
-  const divisor = POINTS_CONFIG.DIVISORS[phaseId] || 1;
-  return basePoints / divisor;
-};
-
-/**
- * Beispiel für die FIFA-Logik (muss mit deinen Weltranglisten-Daten gefüttert werden)
+ * HILFSFUNKTION FÜR FIFA-LOGIK
  */
 export const getDynamicWinnerPoints = (rankA, rankB) => {
-  const diff = rankA - rankB; // Kleinerer Rang = besseres Team
-  if (diff < -20) return 3; // Klarer Favorit gewinnt
-  if (diff > 20) return 5;  // Underdog gewinnt
-  return 4; // Ausgeglichen
+  const diff = rankA - rankB; 
+  if (diff < -20) return 3; 
+  if (diff > 20) return 5;  
+  return 4; 
 };

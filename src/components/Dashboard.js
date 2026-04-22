@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { supabase } from "../supabaseClient";
 import TippsPage from "./TippsPage";
-import AdminResultsPage from "./AdminResultsPage"; // 🛠 NEU: Die separate Admin-Komponente
+import AdminResultsPage from "./AdminResultsPage"; 
 
 const Dashboard = ({ player, onLogout }) => {
   const [activePhase, setActivePhase] = useState("ranking");
@@ -12,14 +12,16 @@ const Dashboard = ({ player, onLogout }) => {
 
   useEffect(() => {
     fetchDashboardData();
-  }, []);
+  }, [activePhase]);
 
   async function fetchDashboardData() {
     setLoading(true);
     try {
+      // 1. System-Konfiguration laden (Phase etc.)
       const { data: config } = await supabase.from("system_config").select("*").single();
       setSystemConfig(config);
 
+      // 2. Die nächsten 3 anstehenden Partien laden
       const { data: matches } = await supabase
         .from("match")
         .select("*")
@@ -27,9 +29,39 @@ const Dashboard = ({ player, onLogout }) => {
         .limit(3);
       setNextMatches(matches || []);
 
-      const { data: players } = await supabase.from("player").select("id, name, display_name");
-      const initialRanking = players?.map(p => ({ ...p, points: 0 })) || [];
-      setRanking(initialRanking);
+      // 3. Alle Punkte-Details aus der neuen Tabelle laden
+      const { data: allPoints, error: pointsError } = await supabase
+        .from("user_points_detail")
+        .select("user_id, points_total");
+      
+      if (pointsError) throw pointsError;
+
+      // 4. Alle Spieler laden
+      const { data: players, error: playerError } = await supabase
+        .from("player")
+        .select("id, name, display_name");
+      
+      if (playerError) throw playerError;
+
+      // 5. Punkte pro Spieler berechnen (Summierung)
+      const calculatedRanking = players?.map(p => {
+        // Wir filtern alle Einträge aus user_points_detail, die zu diesem Spieler gehören
+        // WICHTIG: Mit Number() stellen wir sicher, dass "2" === 2 ist.
+        const userTotal = allPoints
+          ?.filter(entry => Number(entry.user_id) === Number(p.id)) 
+          .reduce((sum, entry) => sum + Number(entry.points_total), 0) || 0;
+
+        return {
+          ...p,
+          points: userTotal
+        };
+      }) || [];
+
+      // 6. Ranking sortieren (Höchste Punktzahl zuerst)
+      calculatedRanking.sort((a, b) => b.points - a.points);
+      
+      setRanking(calculatedRanking);
+
     } catch (error) {
       console.error("Fehler beim Laden der Dashboard-Daten:", error);
     } finally {
@@ -128,7 +160,11 @@ const Dashboard = ({ player, onLogout }) => {
                   {ranking.map((entry, index) => (
                     <tr key={entry.id} style={entry.id === player.id ? myRowStyle : tableRowStyle}>
                       <td style={tdStyle}>{index + 1}.</td>
-                      <td style={tdStyle}>{entry.display_name && entry.display_name !== "EMPTY" ? entry.display_name : entry.name}</td>
+                      <td style={tdStyle}>
+                        {entry.display_name && entry.display_name !== "EMPTY" 
+                          ? entry.display_name 
+                          : entry.name}
+                      </td>
                       <td style={tdStyle}><strong>{entry.points}</strong></td>
                     </tr>
                   ))}
@@ -137,12 +173,10 @@ const Dashboard = ({ player, onLogout }) => {
             </section>
           </>
         ) : activePhase === "admin_results" ? (
-          /* 🛠 GEÄNDERT: Ruft jetzt die dedizierte Admin-Seite auf */
           <div style={flexibleCardStyle}>
             <AdminResultsPage phaseId={systemConfig?.current_phase_id} />
           </div>
         ) : (
-          /* ⚽️ NORMALER TIPP-MODUS (Phase 1-5) */
           <div style={flexibleCardStyle}>
             <TippsPage 
               player={player} 
@@ -155,7 +189,7 @@ const Dashboard = ({ player, onLogout }) => {
   );
 };
 
-// --- STYLES (Unverändert) ---
+// --- STYLES ---
 const layoutStyle = { display: "flex", minHeight: "100vh", backgroundColor: "#f8fafc" };
 const sidebarStyle = { width: "240px", backgroundColor: "#fff", borderRight: "1px solid #e2e8f0", padding: "25px", display: "flex", flexDirection: "column", position: "fixed", height: "100vh", zIndex: 100 };
 const mainContentStyle = { flex: 1, marginLeft: "240px", padding: "40px", overflowX: "auto", minWidth: 0 };
