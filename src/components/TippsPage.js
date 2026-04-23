@@ -88,6 +88,7 @@ function TippsPage({ player, phaseId, context }) {
   async function saveTip(matchId, goalsA, goalsB, winner) {
     if (phase?.is_submitted) return;
 
+    // --- STUFE 1: DEIN CODE (BLEIBT EXAKT SO) ---
     const gA = goalsA !== null ? Number(goalsA) : null;
     const gB = goalsB !== null ? Number(goalsB) : null;
     
@@ -110,20 +111,17 @@ function TippsPage({ player, phaseId, context }) {
     
     const newTips = { ...tips, [matchId]: { goals_a: gA, goals_b: gB, winner: calculatedWinner } };
     setTips(newTips);
+    // --- ENDE STUFE 1 ---
 
-    if (Number(phaseId) === 1) {
-      console.log("Trigger Prognose-Update...");
-      const updatedGroups = Object.keys(grouped).map(name => ({
-        id: name,
-        teams: calculateTable(grouped[name], newTips)
-      }));
+    // --- Prognose-Update Trigger für Phasen 1 bis 4 ---
+    const currentId = Number(phaseId);
 
-      // ÄNDERUNG: Wir behalten die Objekte (inkl. .group), damit das Mapping funktioniert
-      const currentBestThirdsObjects = getBestThirds(updatedGroups).slice(0, 8);
+    if (currentId >= 1 && currentId <= 4) {
+      console.log(`Trigger Prognose-Update für Phase ${currentId}...`);
 
       const currentKoMatches = matches
         .filter(m => m.stage === "ko")
-        .sort((a,b) => a.stage_order - b.stage_order || a.ko_order - b.ko_order);
+        .sort((a, b) => a.stage_order - b.stage_order || a.ko_order - b.ko_order);
 
       const currentKoByRound = {};
       currentKoMatches.forEach(m => {
@@ -131,17 +129,28 @@ function TippsPage({ player, phaseId, context }) {
         currentKoByRound[m.stage_order].push(m);
       });
 
-      const tempContext = { 
-        groups: updatedGroups.reduce((acc, g) => ({ ...acc, [g.id]: g.teams.map(t => t.team) }), {}),
-        thirdPlaces: currentBestThirdsObjects, // Fix: Jetzt mit Group-Eigenschaft
+      // Context vorbereiten
+      const tempContext = {
+        groups: currentId === 1 ? Object.keys(grouped).reduce((acc, name) => ({
+          ...acc, [name]: calculateTable(grouped[name], newTips).map(t => t.team)
+        }), {}) : {},
+        thirdPlaces: currentId === 1 ? getBestThirds(Object.keys(grouped).map(name => ({
+          id: name, teams: calculateTable(grouped[name], newTips)
+        }))).slice(0, 8) : [],
         tips: newTips,
-        phaseId: 1
+        phaseId: currentId
       };
-      
+
+      // KO-Prognose speichern (deckt 1, 2, 3 und 4 ab)
       await updateKOPrognosisDB(player.id, phaseId, currentKoByRound, newTips, tempContext);
-      
-      // Update Gruppentabellen DB
-      await updateGroupPrognosisDB(player.id, updatedGroups, currentBestThirdsObjects.map(t => t.team));
+
+      // Gruppentabellen-Update nur in Phase 1
+      if (currentId === 1) {
+        const updatedGroups = Object.keys(grouped).map(name => ({
+          id: name, teams: calculateTable(grouped[name], newTips)
+        }));
+        await updateGroupPrognosisDB(player.id, updatedGroups, tempContext.thirdPlaces.map(t => t.team));
+      }
     }
   }
 
@@ -287,15 +296,14 @@ async function updateGroupPrognosisDB(playerId, allGroupsArray, bestThirdsTeams)
 }
 
 async function updateKOPrognosisDB(playerId, phaseId, koByRound, tips, context) {
-  console.log("Starte finale KO-Daten Aufbereitung (Prognose-Modus)...");
+  const currentId = Number(phaseId);
+  console.log(`Starte KO-Daten Aufbereitung für Phase ${currentId}...`);
 
-  // 1. Helfer: Holt den Namen aus dem virtuellen Baum
   const getPrognosisTeam = (roundIdx, matchIdx, side) => {
     const name = getTeamFromPrevious(roundIdx, matchIdx, side, koByRound, tips, context);
     return (name && name !== "?") ? name : null;
   };
 
-  // 2. Helfer: Gewinner/Verlierer basierend auf deinen Tipps
   const getProgWinner = (roundIdx, matchIdx) => {
     const stageOrder = roundIdx + 1;
     const m = koByRound[stageOrder]?.[matchIdx];
@@ -314,39 +322,30 @@ async function updateKOPrognosisDB(playerId, phaseId, koByRound, tips, context) 
     return getPrognosisTeam(roundIdx, matchIdx, winnerSide === 1 ? "B" : "A");
   };
 
-  // 3. Sortierung
-  const getSortedMatches = (stage) => (koByRound[stage] || []).sort((a,b) => a.ko_order - b.ko_order);
+  const getSortedMatches = (stage) => (koByRound[stage] || []).sort((a, b) => a.ko_order - b.ko_order);
 
-  const r16 = getSortedMatches(1); // 16tel-Finale (Runde 0)
-  const r8  = getSortedMatches(2); // 8tel-Finale (Runde 1)
-  const r4  = getSortedMatches(3); // Viertelfinale (Runde 2)
-  const r2  = getSortedMatches(4); // Halbfinale (Runde 3)
+  const r16 = getSortedMatches(1); 
+  const r8  = getSortedMatches(2); 
+  const r4  = getSortedMatches(3); 
+  const r2  = getSortedMatches(4); 
   const r3placeMatch = koByRound[5]?.[1];
 
   const finalRecord = {
     player_id: playerId,
-    phase_id: phaseId,
+    phase_id: currentId,
 
-    // --- REACHED (Unverändert übernommen) ---
-    reached_16: r16.flatMap((_, i) => [getPrognosisTeam(0, i, "A"), getPrognosisTeam(0, i, "B")]).filter(Boolean),
-    reached_8:  r8.flatMap((_, i) => [getPrognosisTeam(1, i, "A"), getPrognosisTeam(1, i, "B")]).filter(Boolean),
-    reached_4:  r4.flatMap((_, i) => [getPrognosisTeam(2, i, "A"), getPrognosisTeam(2, i, "B")]).filter(Boolean),
+    // REACHED: Wir schalten Spalten ab, sobald sie der Startpunkt der Phase sind
+    reached_16: (currentId >= 2) ? [] : r16.flatMap((_, i) => [getPrognosisTeam(0, i, "A"), getPrognosisTeam(0, i, "B")]).filter(Boolean),
+    reached_8:  (currentId >= 3) ? [] : r8.flatMap((_, i) => [getPrognosisTeam(1, i, "A"), getPrognosisTeam(1, i, "B")]).filter(Boolean),
+    reached_4:  (currentId >= 4) ? [] : r4.flatMap((_, i) => [getPrognosisTeam(2, i, "A"), getPrognosisTeam(2, i, "B")]).filter(Boolean),
     reached_2:  r2.flatMap((_, i) => [getPrognosisTeam(3, i, "A"), getPrognosisTeam(3, i, "B")]).filter(Boolean),
 
-    // --- DROP OUTS (Neu strukturiert & korrigiert) ---
-    // Wer im 16tel-Finale verliert (Runde 0)
-    drop_out_16: r16.map((_, i) => getProgLoser(0, i)).filter(Boolean),
-
-    // Wer im 8tel-Finale verliert (Runde 1)
-    drop_out_8:  r8.map((_, i) => getProgLoser(1, i)).filter(Boolean),
-
-    // Wer im Viertelfinale verliert (Runde 2)
+    // DROP OUTS: Verlierer werden nur gespeichert, wenn die Runde in dieser Phase getippt wird
+    drop_out_16: (currentId >= 3) ? [] : r16.map((_, i) => getProgLoser(0, i)).filter(Boolean),
+    drop_out_8:  (currentId >= 4) ? [] : r8.map((_, i) => getProgLoser(1, i)).filter(Boolean),
     drop_out_4:  r4.map((_, i) => getProgLoser(2, i)).filter(Boolean),
-
-    // Wer im Halbfinale verliert (Runde 3) -> landet im Spiel um Platz 3
     drop_out_2:  r2.map((_, i) => getProgLoser(3, i)).filter(Boolean),
 
-    // --- FINALS ---
     winner_final: koByRound[5]?.[0] ? getProgWinner(4, 0) : null,
     loser_final:  koByRound[5]?.[0] ? getProgLoser(4, 0) : null,
 
@@ -354,13 +353,11 @@ async function updateKOPrognosisDB(playerId, phaseId, koByRound, tips, context) 
     loser_small_final:  r3placeMatch ? getProgLoser(4, 1) : null
   };
 
-  console.log("Speichere Prognose-Record:", finalRecord);
-
   const { error } = await supabase
     .from("user_prognosis_ko")
     .upsert([finalRecord], { onConflict: 'player_id, phase_id' });
 
-  if (error) console.error("Datenbank-Fehler:", error.message);
+  if (error) console.error(`DB-Fehler Phase ${currentId}:`, error.message);
 }
 
 export default TippsPage;
