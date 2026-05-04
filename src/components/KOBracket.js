@@ -42,7 +42,12 @@ const KOBracket = ({
   };
 
   const BOX_HEIGHT = 135; 
+  const phaseHeights = { 1: "4000px", 2: "3300px", 3: "1650px", 4: "900px", 5: "600px" };
+  const currentMinHeight = phase ? phaseHeights[phase.id] : "100%";
+  const viewportStyle = { minHeight: currentMinHeight, padding: "20px", backgroundColor: "#fff", display: "inline-block", verticalAlign: "top" };
+
   const startIdxOfPhase = phase.id <= 2 ? 0 : phase.id - 2;
+  const treeContainerStyle = (treeHeight) => ({ position: "relative", height: `${treeHeight}px`, backgroundColor: "#fff", width: "fit-content", minWidth: "100%"});
 
   // --- INTERNE RENDER-FUNKTIONEN ---
 
@@ -53,7 +58,9 @@ const KOBracket = ({
       <div style={{ 
         ...teamRowBaseStyle, 
         background: isWinner ? "#f0fff4" : "transparent", 
-        borderBottom: isFirst ? "1px solid #f1f5f9" : "none" 
+        borderBottom: isFirst ? "1px solid #f1f5f9" : "none",
+        position: "relative",
+        width: '${visibleRounds * 300}px' 
       }}>
         <div style={teamInfoFlexStyle}>
           {teamName !== "?" ? (
@@ -108,7 +115,7 @@ const KOBracket = ({
       </div>
 
       {/* 🌲 DER BAUM: Absolute Positionierung der Spiele und Linien */}
-      <div style={{ position: "relative", height: `${treeHeight}px` }}>
+      <div style={ treeContainerStyle(treeHeight)}>
         {Object.keys(koByRound)
           .sort((a, b) => Number(a) - Number(b))
           .filter((roundKey) => (Number(roundKey) - 1) >= startIdxOfPhase)
@@ -245,7 +252,6 @@ const KOBracket = ({
 
 // --- STYLES ---
 
-const viewportStyle = { minWidth: "1600px", padding: "20px" };
 const loadingStyle = { padding: "20px", color: "#666" };
 
 const headerRowStyle = { display: "flex", marginBottom: "60px" };

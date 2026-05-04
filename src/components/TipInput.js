@@ -27,28 +27,36 @@ const TipInput = ({
    * Prüft, ob die Eingaben vollständig sind und triggert onSave.
    */
   const checkAndSave = (a, b, w) => {
-    // FALL A: Nur Sieger-Tipp (z.B. Phase 1 KO-Baum Prognose)
+    // FALL A: Nur Sieger-Tipp (Prognose-Modus)
     if (onlyWinner) {
       if (w) onSave(null, null, w);
       return;
     }
 
-    // FALL B: Tore-Eingabe (Reguläres Spiel)
+    // FALL B: Tore-Eingabe
     if (a !== "" && b !== "") {
       const gA = Number(a);
       const gB = Number(b);
       let finalWinner = w;
 
-      // Speziallogik für KO-System (Unentschieden erfordert manuellen Sieger-Pick)
-      if (isKO) {
-        if (gA > gB) {
-          finalWinner = "1"; 
-        } else if (gB > gA) {
-          finalWinner = "2"; 
-        } else {
-          // Bei Remis in KO-Runde muss ein Sieger im Dropdown gewählt sein
-          if (!w || w === "") return; 
+      if (gA > gB) {
+        finalWinner = "1";
+      } else if (gB > gA) {
+        finalWinner = "2";
+      } else {
+        // --- REMIS LOGIK ---
+        if (isKO) {
+          // Im KO-System: Wenn Tore gleich, MUSS ein Sieger (w) da sein.
+          // Wenn noch kein Sieger gewählt wurde, stoppen wir hier kurz,
+          // damit nicht "null" als Sieger in den KO-Baum wandert.
+          if (!w || w === "") {
+            setWinner(""); 
+            return; // Warte auf Dropdown-Auswahl
+          }
           finalWinner = w;
+        } else {
+          // In der Gruppenphase: Remis ist einfach null/leer.
+          finalWinner = null;
         }
       }
       
