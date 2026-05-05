@@ -23,3 +23,29 @@ export function calculateTable(groupMatches, currentTips) {
     .map(([team, d]) => ({ team, ...d, diff: d.goals - d.conceded }))
     .sort((a, b) => b.points - a.points || b.diff - a.diff);
 }
+
+export function calculateFIFADataTable(groupMatches, tips, manualRanks = {}) {
+  // Wir nutzen deine bestehende Logik für die Grundwerte
+  let table = calculateTable(groupMatches, tips);
+
+  // Jetzt sortieren wir das Ergebnis nach FIFA-Kriterien
+  table.sort((a, b) => {
+    // 1. Punkte (Höher ist besser)
+    if (b.pts !== a.pts) return b.pts - a.pts;
+
+    // 2. Tordifferenz (Höher ist besser)
+    if (b.diff !== a.diff) return b.diff - a.diff;
+
+    // 3. Erzielte Tore (Höher ist besser)
+    if (b.goalsFor !== a.goalsFor) return b.goalsFor - a.goalsFor;
+
+    // 4. Stichwahl / Manueller Rang (Niedrigerer Wert ist besser, z.B. Platz 1 vor Platz 2)
+    // Wir nehmen 99 als Standardwert, falls nichts eingetragen wurde
+    const rankA = manualRanks[a.team] || 99;
+    const rankB = manualRanks[b.team] || 99;
+    
+    return rankA - rankB; 
+  });
+
+  return table;
+}

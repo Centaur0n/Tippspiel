@@ -2,11 +2,6 @@ import React from 'react';
 import TipInput from './TipInput'; 
 import { FlagIcon } from '../Utils/teamUtils';
 
-/**
- * GroupTable: Stellt eine komplette Gruppe dar.
- * Links: Liste der Spiele mit Eingabemöglichkeit (TipInput).
- * Rechts: Die daraus resultierende Live-Tabelle.
- */
 const GroupTable = ({ 
   groupName, 
   matches, 
@@ -15,16 +10,26 @@ const GroupTable = ({
   isSubmitted, 
   onDeleteTips, 
   onSaveTip,
+  manualRanks = {},
+  onSaveManualRank,
   isAdmin = false 
 }) => {
+
+  // --- LOGIK: PRÜFEN OB GLEICHSTAND VORLIEGT ---
+  const hasTie = tableData.some((teamA, i) => 
+    tableData.some((teamB, j) => 
+      i !== j && 
+      teamA.points === teamB.points && 
+      teamA.diff === teamB.diff && 
+      teamA.goals === teamB.goals
+    )
+  );
 
   return (
     <div style={mainContainerStyle}>
       
       {/* --- 🔵 LINKE SEITE: SPIELLISTE --- */}
       <div style={matchSectionStyle}>
-        
-        {/* Header der Spiel-Sektion mit Reset-Button */}
         <div style={headerContainerStyle}>
           <h3 style={groupTitleStyle}>Gruppe {groupName}</h3>
           {!isSubmitted && !isAdmin && (
@@ -34,54 +39,28 @@ const GroupTable = ({
           )}
         </div>
 
-        {/* Darstellung der einzelnen Partien */}
         {[...matches]
           .sort((a, b) => (a.match_order || 0) - (b.match_order || 0))
           .map((m) => {
             const tip = tips[m.id];
-            
             return (
               <div key={m.id} style={matchCardStyle}>                  
                 <div style={matchFlexStyle}>
-                  
-                  {/* Team A (Rechtsbündig) */}
                   <div style={teamAContainerStyle}>
                     <span style={teamNameStyle}>{m.team_a}</span>
                     <FlagIcon teamName={m.team_a} />
                   </div>
-
-                  {/* Ergebnis-Anzeige oder Eingabefeld (Bereinigt) */}
                   <div style={scoreDisplayContainerStyle}>
-                    {/* 🛠 LOGIK: Wenn Admin, zeige IMMER Input. Sonst nur wenn kein Tipp da. */}
-                    {isAdmin ? (
-                      <TipInput
-                        isKO={false}
-                        initialGoalsA={tip?.goals_a}
-                        initialGoalsB={tip?.goals_b}
-                        onSave={(a, b, w) => onSaveTip(m.id, a, b, w)}
-                      />
+                    {tip ? (
+                      <div style={savedScoreStyle}>{tip.goals_a} : {tip.goals_b}</div>
                     ) : (
-                    tip ? (
-                      <div style={savedScoreStyle}>
-                        {tip.goals_a} : {tip.goals_b}
-                      </div>
-                    ) : (
-                      !isSubmitted && (
-                        <TipInput
-                          isKO={false}
-                          onSave={(a, b, w) => onSaveTip(m.id, a, b, w)}
-                        />
-                      )
-                    )
-                  )} 
+                      !isSubmitted && <TipInput isKO={false} onSave={(a, b, w) => onSaveTip(m.id, a, b, w)} />
+                    )}
                   </div>
-
-                  {/* Team B (Linksbündig) */}
                   <div style={teamBContainerStyle}>
                     <FlagIcon teamName={m.team_b} />
                     <span style={teamNameStyle}>{m.team_b}</span>
                   </div>
-
                 </div>
               </div>
             );
@@ -95,52 +74,106 @@ const GroupTable = ({
             <tr style={tableHeaderRowStyle}>
               <th style={thStyle}>#</th>
               <th style={thStyle}>Team</th>
-              <th style={thCenterStyle}>Pkt</th>
-              <th style={thCenterStyle}>Tore</th>
-              <th style={thCenterStyle}>GT</th>
-              <th style={thCenterStyle}>Diff</th>
+              <th style={thCenterStyle}>PKT</th>
+              <th style={thCenterStyle}>DIFF</th>
+              <th style={thCenterStyle}>TORE</th>
             </tr>
           </thead>
           <tbody>
             {tableData.map((row, index) => {
-              const isQualified = index < 2; // Ersten zwei Plätze markieren
-              
+              const isQualified = index < 2;
               return (
-                <tr key={row.team} style={{ 
-                  ...tableRowStyle,
-                  backgroundColor: isQualified ? "#f0fff4" : "#ffffff"
-                }}>
+                <tr key={row.team} style={{ ...tableRowStyle, backgroundColor: isQualified ? "#f0fff4" : "#ffffff" }}>
                   <td style={rankTdStyle}>{index + 1}.</td>
-                  
                   <td style={{ ...teamTdStyle, fontWeight: isQualified ? "600" : "400" }}>
-                    <div style={teamCellContentStyle}>
-                      <FlagIcon teamName={row.team} />
-                      {row.team}
-                    </div>
+                    <div style={teamCellContentStyle}><FlagIcon teamName={row.team} />{row.team}</div>
                   </td>
-
                   <td style={pointsTdStyle}>{row.points}</td>
-                  <td style={tdCenterStyle}>{row.goals}</td>
-                  <td style={tdCenterStyle}>{row.conceded}</td>
-                  
                   <td style={{ 
                     ...tdCenterStyle, 
-                    color: row.diff < 0 ? "#e53e3e" : "#2d3748",
-                    fontWeight: row.diff !== 0 ? "600" : "400"
+                    color: row.diff < 0 ? "#e53e3e" : "#2d3748", 
+                    fontWeight: row.diff !== 0 ? "600" : "400" 
                   }}>
                     {row.diff > 0 ? `+${row.diff}` : row.diff}
                   </td>
+                  <td style={tdCenterStyle}>{row.goals}</td>
                 </tr>
               );
             })}
           </tbody>
         </table>
+
+        {/* --- 🟡 STICHWAHL-SEKTION: NUR BEI GLEICHSTAND --- */}
+        {hasTie && (
+          <div style={swContainerStyle}>
+            <div style={swHeaderStyle}>⚠️ Gleichstand erkannt: Stichwahl nötig</div>
+            <div style={swGridStyle}>
+              {tableData.map(row => (
+                <div key={row.team} style={swRowStyle}>
+                  <span style={{fontSize: '0.85rem'}}>{row.team}</span>
+                  <input 
+                    type="number"
+                    min="1"
+                    max="4"
+                    value={manualRanks[row.team] || ""}
+                    onChange={(e) => onSaveManualRank(row.team, e.target.value)}
+                    disabled={isSubmitted}
+                    style={manualRankInputStyle}
+                    placeholder="-"
+                  />
+                </div>
+              ))}
+            </div>
+            <p style={hintTextStyle}>* Trage 1 für den 1. Platz, 2 für den 2. Platz etc. ein, um den Gleichstand manuell aufzulösen.</p>
+          </div>
+        )}
       </div>
     </div>
   );
 };
 
 // --- STYLES ---
+
+const swContainerStyle = {
+  marginTop: "20px",
+  padding: "15px",
+  backgroundColor: "#fffaf0",
+  border: "1px solid #feebc8",
+  borderRadius: "8px"
+};
+
+const swHeaderStyle = {
+  fontSize: "0.8rem",
+  fontWeight: "bold",
+  color: "#c05621",
+  marginBottom: "10px",
+  textTransform: "uppercase"
+};
+
+const swGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "1fr 1fr",
+  gap: "10px"
+};
+
+const swRowStyle = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  padding: "5px 10px",
+  backgroundColor: "#fff",
+  border: "1px solid #edf2f7",
+  borderRadius: "4px"
+};
+
+const manualRankInputStyle = {
+  width: "35px",
+  textAlign: "center",
+  border: "1px solid #cbd5e0",
+  borderRadius: "4px",
+  fontSize: "0.85rem",
+  fontWeight: "bold"
+};
 
 const mainContainerStyle = { display: "flex", gap: "80px", alignItems: "flex-start", marginBottom: "60px", fontFamily: "sans-serif" };
 const matchSectionStyle = { width: "400px" };
@@ -166,5 +199,6 @@ const tdCenterStyle = { ...tdStyle, textAlign: "center" };
 const rankTdStyle = { ...tdStyle, color: "#718096", width: "30px" };
 const teamTdStyle = { ...tdStyle, color: "#2d3748" };
 const pointsTdStyle = { ...tdCenterStyle, fontWeight: "bold", color: "#000" };
+const hintTextStyle = { fontSize: "0.7rem", color: "#718096", marginTop: "10px", fontStyle: "italic" };
 
 export default GroupTable;

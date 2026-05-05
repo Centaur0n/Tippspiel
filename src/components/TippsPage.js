@@ -3,7 +3,8 @@ import { supabase } from "../supabaseClient";
 import { getBestThirds } from "../Utils/calcTable";
 
 // --- LOGIK & UTILS ---
-import { calculateTable } from "../logic/tournamentLogic";
+// Wichtig: Stelle sicher, dass calculateFIFADataTable in deiner tournamentLogic.js existiert!
+import { calculateTable, calculateFIFADataTable } from "../logic/tournamentLogic";
 import { getTopPosition, resolveSlot, getTeamFromPrevious } from "../logic/koLogic";
 
 // --- UI-KOMPONENTEN ---
@@ -12,7 +13,7 @@ import KOBracket from './KOBracket';
 import BestThirdsTable from './BestThirdsTable';
 import TipInput from './TipInput';
 
-// ... (Styles und Konstanten bleiben identisch)
+// --- STYLES & KONSTANTEN ---
 const KO_STRUCTURE = {
   round16: [
     ["E1", "1E"], ["I1", "1I"], ["F1", "C2"], ["B2", "A2"],
@@ -44,12 +45,12 @@ const winnerSubTextStyle = { fontSize: "0.65rem", color: "#666", fontWeight: "no
 function TippsPage({ player, phaseId, context, isAdmin }) {
   const [matches, setMatches] = useState([]);
   const [tips, setTips] = useState({});
+  const [manualRanks, setManualRanks] = useState({}); // NEU: State für Stichwahl-Sortierung
   const [phase, setPhase] = useState(null);
   const [treeHeight, setTreeHeight] = useState(800);
   const groupRef = useRef(null);
 
   useEffect(() => {
-    // Sicherstellen, dass player existiert, bevor fetch aufgerufen wird
     if (player?.id && phaseId) {
       fetchMatches();
       fetchTips();
@@ -66,9 +67,6 @@ function TippsPage({ player, phaseId, context, isAdmin }) {
     }
   }, [matches, tips, phaseId]);
 
-  // --- EARLY RETURN ---
-  // Wenn noch kein Player oder Phase-Informationen da sind, rendern wir "Laden"
-  // Das verhindert den "Cannot read properties of null (reading 'id')" Fehler
   if (!player || !phaseId) {
     return <div style={{ padding: "20px" }}>Lade Benutzerdaten...</div>;
   }
@@ -80,22 +78,63 @@ function TippsPage({ player, phaseId, context, isAdmin }) {
 
   async function fetchTips() {
     if (!player?.id || !phaseId) return;
+    
+    // 1. Normale Tipps
     const { data: normalData } = await supabase.from("tip").select("*").eq("player_id", player.id).eq("phase_id", phaseId);
+    
+    // 2. Matrix Tipps (für Phase 5)
     let matrixData = [];
     if (Number(phaseId) === 5) {
       const { data } = await supabase.from("tip_final_matrix").select("*").eq("player_id", player.id);
       if (data) matrixData = data;
     }
+    
+    // 3. Manuelle Ränge (Stichwahl bei absolutem Gleichstand)
+    const { data: rankData } = await supabase.from("tip_manual_rank").select("*").eq("player_id", player.id).eq("phase_id", phaseId);
+
     const map = {};
     normalData?.forEach((t) => (map[t.match_id] = t));
     matrixData?.forEach((t) => (map[t.matrix_key] = t));
     setTips(map);
+
+    const rankMap = {};
+    rankData?.forEach((r) => (rankMap[r.team_name] = r.manual_rank));
+    setManualRanks(rankMap);
   }
 
   async function fetchPhase() {
     if (!phaseId) return;
     const { data } = await supabase.from("tip_phase").select("*").eq("id", phaseId).single();
     setPhase(data);
+  }
+
+  // --- NEUE FUNKTIONEN FÜR MANUELLE RÄNGE ---
+  async function saveManualRank(teamName, rank) {
+    if (phase?.is_submitted) return;
+    const val = rank === "" ? null : Number(rank);
+    
+    await supabase.from("tip_manual_rank").upsert([{
+      player_id: player.id,
+      phase_id: phaseId,
+      team_name: teamName,
+      manual_rank: val
+    }], { onConflict: 'player_id, phase_id, team_name' });
+
+    setManualRanks(prev => ({ ...prev, [teamName]: val }));
+  }
+
+  async function resetGroup(groupName) {
+    if (phase?.is_submitted) return;
+
+    const groupMatches = matches.filter(m => m.group_name === groupName);
+    const matchIds = groupMatches.map(m => m.id);
+    const teamsInGroup = [...new Set(groupMatches.flatMap(m => [m.team_a, m.team_b]))];
+
+    // Löscht sowohl Tipps als auch die manuellen Entscheidungen
+    await supabase.from("tip").delete().eq("player_id", player.id).in("match_id", matchIds);
+    await supabase.from("tip_manual_rank").delete().eq("player_id", player.id).eq("phase_id", phaseId).in("team_name", teamsInGroup);
+
+    fetchTips(); 
   }
 
   // --- HELPER LOGIK ---
@@ -146,6 +185,7 @@ function TippsPage({ player, phaseId, context, isAdmin }) {
       if (gA > gB) calculatedWinner = "1";
       else if (gB > gA) calculatedWinner = "2";
     }
+    
     const isSpecial = typeof matchId === 'string' && matchId.startsWith('OPT');
     if (isSpecial) {
       await supabase.from("tip_final_matrix").upsert([{
@@ -158,6 +198,8 @@ function TippsPage({ player, phaseId, context, isAdmin }) {
         goals_a: gA, goals_b: gB, winner: calculatedWinner,
       }], { onConflict: 'player_id, match_id, phase_id' });
     }
+    
+    // UI sofort aktualisieren
     setTips(prev => ({ ...prev, [matchId]: { goals_a: gA, goals_b: gB, winner: calculatedWinner } }));
   }
 
@@ -296,14 +338,19 @@ function TippsPage({ player, phaseId, context, isAdmin }) {
     );
   };
 
-  // --- HAUPT LOGIK FÜR TURNIERBAUM ---
+  // --- HAUPT LOGIK FÜR TURNIERBAUM & TABELLEN ---
   const grouped = {};
   matches.filter(m => m.stage === "group").forEach(m => {
     if (!grouped[m.group_name]) grouped[m.group_name] = [];
     grouped[m.group_name].push(m);
   });
 
-  const allGroupsArray = Object.keys(grouped).map(name => ({ id: name, teams: calculateTable(grouped[name], tips) }));
+  // Zentrale Berechnung aller Tabellen (Redundanz entfernt)
+  const allGroupsArray = Object.keys(grouped).map(name => ({ 
+    id: name, 
+    teams: calculateFIFADataTable(grouped[name], tips, manualRanks) 
+  }));
+
   const bestThirds = getBestThirds(allGroupsArray);
   const groupResults = {};
   allGroupsArray.forEach(g => { groupResults[g.id] = g.teams.map(t => t.team); });
@@ -315,11 +362,7 @@ function TippsPage({ player, phaseId, context, isAdmin }) {
     koByRound[m.stage_order].push(m);
   });
 
-  // WICHTIG: Nutze phaseId (Props) statt phase.id (State), 
-  // da phase.id kurzzeitig null sein kann.
   const tournamentContext = { groups: groupResults, thirdPlaces: bestThirds.slice(0, 8), tips, phaseId: phaseId };
-  
-  // Auch hier: Sicherstellen, dass phase nicht null ist
   const currentSpacing = phase ? (PHASE_SPACING[phase.id] || 70) : 70;
   const startIdxOfPhase = phase ? (phase.id <= 2 ? 0 : phase.id - 2) : 0;
   const topOffset = getTopPosition(startIdxOfPhase, 0, treeHeight, currentSpacing);
@@ -333,10 +376,19 @@ function TippsPage({ player, phaseId, context, isAdmin }) {
               <h3>Gruppenphase</h3>
               <div style={{ display: "flex", flexWrap: "wrap", gap: "30px", marginBottom: "40px", maxWidth: "1100px" }}>
                 {Object.keys(grouped).sort().map(name => (
-                  <GroupTable 
-                    key={name} groupName={name} matches={grouped[name]} tips={tips} 
-                    tableData={calculateTable(grouped[name], tips)} onSaveTip={saveTip} isSubmitted={phase?.is_submitted} 
-                  />
+                  <div key={name} style={{ position: 'relative' }}>
+                    <GroupTable 
+                        groupName={name} 
+                        matches={grouped[name]} 
+                        tips={tips} 
+                        tableData={calculateFIFADataTable(grouped[name], tips, manualRanks)} 
+                        onSaveTip={saveTip} 
+                        isSubmitted={phase?.is_submitted}
+                        manualRanks={manualRanks} 
+                        onSaveManualRank={saveManualRank}
+                        onDeleteTips={resetGroup}
+                    />
+                  </div>
                 ))}
               </div>
               <BestThirdsTable teams={bestThirds} />
