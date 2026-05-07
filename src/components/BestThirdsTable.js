@@ -1,16 +1,16 @@
 import React from 'react';
 import { FlagIcon } from '../Utils/teamUtils';
+import { BEST_THIRDS_STYLES } from '../Utils/uiConstants';
 
 /**
  * BestThirdsTable: Komponente zur Darstellung der Rangliste der Gruppendritten.
- * Inklusive Warn-Logik bei absolutem Gleichstand und manueller Stichwahl.
+ * Nutzt nun zentralisierte Styles aus uiConstants.
  */
 function BestThirdsTable({ teams, manualRanks = {}, onSaveManualRank, isSubmitted }) {
   
   if (!teams || teams.length === 0) return null;
 
   // --- 1. LOGIK: GLEICHSTAND IDENTIFIZIEREN ---
-  // Wir suchen Teams, die in Punkten, Differenz und Toren identisch sind
   const tiedTeams = teams.filter((team, index) => {
     const next = teams[index + 1];
     const prev = teams[index - 1];
@@ -31,25 +31,25 @@ function BestThirdsTable({ teams, manualRanks = {}, onSaveManualRank, isSubmitte
   const hasTies = tiedTeams.length > 0;
 
   return (
-    <div style={containerStyle}>
-      <h3 style={titleStyle}>Rangliste der Gruppendritten</h3>
+    <div style={BEST_THIRDS_STYLES.container}>
+      <h3 style={BEST_THIRDS_STYLES.title}>Rangliste der Gruppendritten</h3>
 
       {/* --- FEHLERMELDUNG & MANUELLE STICHWAHL --- */}
       {hasTies && (
-        <div style={errorBoxStyle}>
+        <div style={BEST_THIRDS_STYLES.errorBox}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
             <span style={{ fontSize: '1.2rem' }}>⚠️</span>
             <strong style={{ color: "#c53030" }}>Gleichstand bei den Gruppendritten!</strong>
           </div>
           <p style={{ fontSize: "0.85rem", marginBottom: "15px", color: "#4a5568" }}>
-            Punkte, Tordifferenz und Tore sind identisch. Bitte lege die Reihenfolge manuell fest (kleinere Zahl = besserer Rang):
+            Punkte, Tordifferenz und Tore sind identisch. Bitte lege die Reihenfolge manuell fest:
           </p>
           
           <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
             {tiedTeams.map((team) => {
               const displayName = team.team || team.name;
               return (
-                <div key={`tie-${displayName}`} style={tieRowStyle}>
+                <div key={`tie-${displayName}`} style={BEST_THIRDS_STYLES.tieRow}>
                   <div style={{ display: "flex", alignItems: "center", gap: "10px", flex: 1 }}>
                     <FlagIcon teamName={displayName} />
                     <span style={{ fontSize: "0.9rem", fontWeight: "600" }}>
@@ -63,7 +63,7 @@ function BestThirdsTable({ teams, manualRanks = {}, onSaveManualRank, isSubmitte
                     value={manualRanks[displayName] || ""}
                     onChange={(e) => onSaveManualRank(displayName, e.target.value)}
                     disabled={isSubmitted}
-                    style={tieInputStyle}
+                    style={BEST_THIRDS_STYLES.tieInput}
                   />
                 </div>
               );
@@ -73,56 +73,55 @@ function BestThirdsTable({ teams, manualRanks = {}, onSaveManualRank, isSubmitte
       )}
 
       {/* --- HAUPTTABELLE --- */}
-      <table style={tableStyle}>
+      <table style={BEST_THIRDS_STYLES.tableBase}>
         <thead>
-          <tr style={headerRowStyle}>
-            <th style={thStyle}>#</th>
-            <th style={thCenterStyle}>Grp</th>
-            <th style={thStyle}>Team</th>
-            <th style={thCenterStyle}>Pkt</th>
-            <th style={thCenterStyle}>Diff</th>
-            <th style={thCenterStyle}>Tore</th>
+          <tr style={BEST_THIRDS_STYLES.headerRow}>
+            <th style={BEST_THIRDS_STYLES.th}>#</th>
+            <th style={BEST_THIRDS_STYLES.thCenter}>Grp</th>
+            <th style={BEST_THIRDS_STYLES.th}>Team</th>
+            <th style={BEST_THIRDS_STYLES.thCenter}>Pkt</th>
+            <th style={BEST_THIRDS_STYLES.thCenter}>Diff</th>
+            <th style={BEST_THIRDS_STYLES.thCenter}>Tore</th>
           </tr>
         </thead>
         
         <tbody>
           {teams.slice(0, 12).map((team, index) => {
             const isQualified = index < 8;
-            
             const displayDiff = team.goalDiff !== undefined ? team.goalDiff : team.diff;
             const displayGoals = team.goalsFor !== undefined ? team.goalsFor : team.goals;
             const displayName = team.name || team.team;
             const displayGroup = team.groupId || team.group;
 
-            const rowFontWeight = isQualified ? "bold" : "normal";
-            const rowColor = isQualified ? "#000" : "#718096";
-
             return (
-              <tr key={`${displayName}-${index}`} style={{ ...rowStyle, backgroundColor: isQualified ? "#f0fff4" : "#ffffff" }}>
-                <td style={{ ...tdStyle, fontWeight: rowFontWeight, color: rowColor, width: "30px" }}>
+              <tr key={`${displayName}-${index}`} style={BEST_THIRDS_STYLES.row(isQualified)}>
+                <td style={{ ...BEST_THIRDS_STYLES.td(isQualified), width: "30px" }}>
                   {index + 1}.
                 </td>
 
-                <td style={{ ...tdCenterStyle, fontWeight: rowFontWeight, color: rowColor, width: "40px" }}>
+                <td style={{ ...BEST_THIRDS_STYLES.tdCenter(isQualified), width: "40px" }}>
                   {displayGroup}
                 </td>
 
-                <td style={{ ...tdStyle, fontWeight: rowFontWeight, color: rowColor }}>
-                  <div style={teamCellContentStyle}>
+                <td style={BEST_THIRDS_STYLES.td(isQualified)}>
+                  <div style={BEST_THIRDS_STYLES.teamCell}>
                     <FlagIcon teamName={displayName} />
                     {displayName}
                   </div>
                 </td>
 
-                <td style={{ ...tdCenterStyle, fontWeight: rowFontWeight, color: rowColor }}>
+                <td style={BEST_THIRDS_STYLES.tdCenter(isQualified)}>
                   {team.points}
                 </td>
 
-                <td style={{ ...tdCenterStyle, fontWeight: rowFontWeight, color: displayDiff < 0 ? "#e53e3e" : (displayDiff > 0 ? "#38a169" : rowColor) }}>
+                <td style={{ 
+                  ...BEST_THIRDS_STYLES.tdCenter(isQualified), 
+                  color: displayDiff < 0 ? "#e53e3e" : (displayDiff > 0 ? "#38a169" : (isQualified ? "#000" : "#718096")) 
+                }}>
                   {displayDiff > 0 ? `+${displayDiff}` : displayDiff}
                 </td>
 
-                <td style={{ ...tdCenterStyle, fontWeight: rowFontWeight, color: rowColor }}>
+                <td style={BEST_THIRDS_STYLES.tdCenter(isQualified)}>
                   {displayGoals}
                 </td>
               </tr>
@@ -133,49 +132,5 @@ function BestThirdsTable({ teams, manualRanks = {}, onSaveManualRank, isSubmitte
     </div>
   );
 }
-
-// --- STYLES ---
-const containerStyle = { marginTop: "40px", width: "100%", fontFamily: "sans-serif" };
-const titleStyle = { marginBottom: "15px", color: "#333", fontSize: "1.2em", fontWeight: "bold" };
-const tableStyle = { width: "100%", borderCollapse: "collapse", boxShadow: "0 2px 8px rgba(0,0,0,0.05)", borderRadius: "8px", overflow: "hidden" };
-const headerRowStyle = { backgroundColor: "#6b94e7", color: "#ffffff", textAlign: "left" };
-const rowStyle = { borderBottom: "1px solid #edf2f7", transition: "background-color 0.2s" };
-const teamCellContentStyle = { display: "flex", alignItems: "center", gap: "10px" };
-
-const thStyle = { padding: "12px 10px", fontWeight: "600", fontSize: "0.85em", textTransform: "uppercase", letterSpacing: "0.05em" };
-const thCenterStyle = { ...thStyle, textAlign: "center" };
-const tdStyle = { padding: "10px 10px", fontSize: "0.95em" };
-const tdCenterStyle = { ...tdStyle, textAlign: "center" };
-
-// Styles für die Warnbox (analog zu GroupTable)
-const errorBoxStyle = {
-  backgroundColor: "#fff5f5",
-  border: "1px solid #fffaf0",
-  borderRadius: "8px",
-  padding: "15px",
-  marginBottom: "25px",
-  boxShadow: "0 2px 4px rgba(0,0,0,0.05)"
-};
-
-const tieRowStyle = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-  background: "#ffffff",
-  padding: "10px 15px",
-  borderRadius: "6px",
-  border: "1px solid #edf2f7",
-  marginBottom: "5px"
-};
-
-const tieInputStyle = {
-  width: "60px",
-  padding: "6px",
-  borderRadius: "4px",
-  border: "1px solid #cbd5e0",
-  textAlign: "center",
-  fontWeight: "bold",
-  outline: "none"
-};
 
 export default BestThirdsTable;

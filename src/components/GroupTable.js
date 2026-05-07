@@ -16,8 +16,11 @@ const GroupTable = ({
   isAdmin = false 
 }) => {
 
+  // Prüft, ob für alle Spiele dieser Gruppe bereits Tipps abgegeben wurden
   const isGroupFinished = matches.every(m => tips[m.id] !== undefined);
 
+  // ERMITTLUNG VON GLEICHSTAND:
+  // Sucht nach Teams, die exakt dieselben Punkte, Differenz und Tore haben
   const tiedTeams = tableData.filter((teamA, i) => 
     tableData.some((teamB, j) => 
       i !== j && 
@@ -35,6 +38,7 @@ const GroupTable = ({
       <div style={GROUP_TABLE_STYLES.matchSection}>
         <div style={GROUP_TABLE_STYLES.headerContainer}>
           <h3 style={GROUP_TABLE_STYLES.groupTitle}>Gruppe {groupName}</h3>
+          {/* Reset-Button wird nur angezeigt, wenn noch nicht abgegeben wurde */}
           {!isSubmitted && !isAdmin && (
             <button onClick={() => onDeleteTips(groupName)} style={GROUP_TABLE_STYLES.resetButton}>
               Reset
@@ -42,6 +46,7 @@ const GroupTable = ({
           )}
         </div>
 
+        {/* Spiele werden nach ihrer festgelegten Reihenfolge sortiert */}
         {[...matches]
           .sort((a, b) => (a.match_order || 0) - (b.match_order || 0))
           .map((m) => {
@@ -53,6 +58,8 @@ const GroupTable = ({
                     <span style={GROUP_TABLE_STYLES.teamName}>{m.team_a}</span>
                     <FlagIcon teamName={m.team_a} />
                   </div>
+                  
+                  {/* Anzeige: Entweder der gespeicherte Tipp oder das Eingabefeld */}
                   <div style={GROUP_TABLE_STYLES.scoreDisplayContainer}>
                     {tip ? (
                       <div style={GROUP_TABLE_STYLES.savedScore}>{tip.goals_a} : {tip.goals_b}</div>
@@ -60,6 +67,7 @@ const GroupTable = ({
                       !isSubmitted && <TipInput isKO={false} onSave={(a, b, w) => onSaveTip(m.id, a, b, w)} />
                     )}
                   </div>
+
                   <div style={GROUP_TABLE_STYLES.teamBContainer}>
                     <FlagIcon teamName={m.team_b} />
                     <span style={GROUP_TABLE_STYLES.teamName}>{m.team_b}</span>
@@ -84,15 +92,23 @@ const GroupTable = ({
           </thead>
           <tbody>
             {tableData.map((row, index) => {
-              const isQualified = index < 2;
+              const isQualified = index < 2; // Die ersten beiden Plätze sind grün markiert
               return (
                 <tr key={row.team} style={{ ...GROUP_TABLE_STYLES.tableRow, backgroundColor: isQualified ? "#f0fff4" : "#ffffff" }}>
                   <td style={GROUP_TABLE_STYLES.rankTd}>{index + 1}.</td>
                   <td style={{ ...GROUP_TABLE_STYLES.td, color: "#2d3748", fontWeight: isQualified ? "600" : "400" }}>
-                    <div style={GROUP_TABLE_STYLES.teamCellContent}><FlagIcon teamName={row.team} />{row.team}</div>
+                    <div style={GROUP_TABLE_STYLES.teamCellContent}>
+                      <FlagIcon teamName={row.team} />
+                      {row.team}
+                    </div>
                   </td>
                   <td style={GROUP_TABLE_STYLES.pointsTd}>{row.points}</td>
-                  <td style={{ ...GROUP_TABLE_STYLES.td, textAlign: 'center', color: row.diff < 0 ? "#e53e3e" : "#2d3748", fontWeight: row.diff !== 0 ? "600" : "400" }}>
+                  <td style={{ 
+                    ...GROUP_TABLE_STYLES.td, 
+                    textAlign: 'center', 
+                    color: row.diff < 0 ? "#e53e3e" : "#2d3748", // Negatives Torverhältnis wird rot markiert
+                    fontWeight: row.diff !== 0 ? "600" : "400" 
+                  }}>
                     {row.diff > 0 ? `+${row.diff}` : row.diff}
                   </td>
                   <td style={{...GROUP_TABLE_STYLES.td, textAlign: 'center'}}>{row.goals}</td>
@@ -102,7 +118,7 @@ const GroupTable = ({
           </tbody>
         </table>
 
-        {/* STICHWAHL-SEKTION */}
+        {/* STICHWAHL-SEKTION (Manuelle Platzierung bei absolutem Gleichstand) */}
         {isGroupFinished && hasTie && (
           <div style={GROUP_TABLE_STYLES.swContainer}>
             <div style={GROUP_TABLE_STYLES.swHeader}>⚠️ Stichwahl nötig</div>

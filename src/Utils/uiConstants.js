@@ -235,3 +235,35 @@ export const GROUP_TABLE_STYLES = {
   swRow: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 10px", backgroundColor: "#ffffff", border: "1px solid #edf2f7", borderRadius: "6px" },
   manualRankInput: { width: "40px", padding: "4px", textAlign: "center", border: "1px solid #cbd5e0", borderRadius: "4px", fontSize: "0.85rem", fontWeight: "bold", color: "#2d3748" }
 };
+
+// --- BestThirdsTable ---
+export const BEST_THIRDS_STYLES = {
+  container: { marginTop: "40px", width: "100%", fontFamily: "sans-serif" },
+  title: { marginBottom: "15px", color: "#333", fontSize: "1.2em", fontWeight: "bold" },
+  tableBase: { width: "100%", borderCollapse: "collapse", boxShadow: "0 2px 8px rgba(0,0,0,0.05)", borderRadius: "8px", overflow: "hidden" },
+  headerRow: { backgroundColor: "#6b94e7", color: "#ffffff", textAlign: "left" },
+  row: (isQualified) => ({ 
+    borderBottom: "1px solid #edf2f7", 
+    transition: "background-color 0.2s",
+    backgroundColor: isQualified ? "#f0fff4" : "#ffffff" 
+  }),
+  teamCell: { display: "flex", alignItems: "center", gap: "10px" },
+  th: { padding: "12px 10px", fontWeight: "600", fontSize: "0.85em", textTransform: "uppercase", letterSpacing: "0.05em" },
+  thCenter: { padding: "12px 10px", fontWeight: "600", fontSize: "0.85em", textTransform: "uppercase", letterSpacing: "0.05em", textAlign: "center" },
+  td: (isQualified) => ({ 
+    padding: "10px 10px", 
+    fontSize: "0.95em", 
+    fontWeight: isQualified ? "bold" : "normal", 
+    color: isQualified ? "#000" : "#718096" 
+  }),
+  tdCenter: (isQualified) => ({ 
+    padding: "10px 10px", 
+    fontSize: "0.95em", 
+    textAlign: "center",
+    fontWeight: isQualified ? "bold" : "normal", 
+    color: isQualified ? "#000" : "#718096" 
+  }),
+  errorBox: { backgroundColor: "#fff5f5", border: "1px solid #fffaf0", borderRadius: "8px", padding: "15px", marginBottom: "25px", boxShadow: "0 2px 4px rgba(0,0,0,0.05)" },
+  tieRow: { display: "flex", alignItems: "center", justifyContent: "space-between", background: "#ffffff", padding: "10px 15px", borderRadius: "6px", border: "1px solid #edf2f7", marginBottom: "5px" },
+  tieInput: { width: "60px", padding: "6px", borderRadius: "4px", border: "1px solid #cbd5e0", textAlign: "center", fontWeight: "bold", outline: "none" }
+};

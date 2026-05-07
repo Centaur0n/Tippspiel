@@ -3,6 +3,7 @@ import TipInput from './TipInput';
 import { FlagIcon } from '../Utils/teamUtils'; 
 import { BRACKET_STYLES, PHASE_HEIGHTS } from '../Utils/uiConstants';
 
+// Fixe Höhe einer Match-Box inklusive Label und Tipp-Feld
 const BOX_HEIGHT = 135;
 
 const KOBracket = ({ 
@@ -11,15 +12,21 @@ const KOBracket = ({
   saveTip, deleteKORound, isAdmin 
 }) => {
 
+  // Lade-Zustand, falls Daten noch nicht bereit sind
   if (!phase) return <div style={BRACKET_STYLES.loading}>Lade Turnierdaten...</div>;
 
+  // Fallback für Rundennamen, falls diese nicht über Props kommen
   const safeRoundNames = roundNames || { 
     1: "Sechzehntelfinale", 2: "Achtelfinale", 3: "Viertelfinale", 4: "Halbfinale", 5: "Finale" 
   };
   
+  // Bestimmt, ab welcher Runde der Baum gezeichnet wird (wichtig für die Phasen-Ansicht)
   const startIdxOfPhase = phase.id <= 2 ? 0 : phase.id - 2;
 
-  // Interne Helper-Komponente für die Team-Zeilen (nutzt jetzt BRACKET_STYLES)
+  /**
+   * TeamRow: Interne Hilfskomponente für die Darstellung eines Teams innerhalb eines Spiels.
+   * Nutzt die BRACKET_STYLES für Gewinner-Hervorhebung und Layout.
+   */
   const TeamRow = ({ teamName, side, isFirst, winningSide }) => {
     const isWinner = winningSide === side;
     return (
@@ -42,7 +49,7 @@ const KOBracket = ({
   return (
     <div style={BRACKET_STYLES.viewport(PHASE_HEIGHTS[phase.id])}>
       
-      {/* HEADER: Runden-Namen und Reset-Buttons */}
+      {/* HEADER: Anzeige der Rundennamen und Reset-Optionen pro Spalte */}
       <div style={BRACKET_STYLES.headerRow}>
         {Object.keys(koByRound)
           .sort((a, b) => Number(a) - Number(b))
@@ -57,7 +64,7 @@ const KOBracket = ({
         ))}
       </div>
 
-      {/* DER TURNIERBAUM */}
+      {/* DER TURNIERBAUM: Die eigentliche Visualisierung der Spiele */}
       <div style={BRACKET_STYLES.treeContainer(treeHeight)}>
         {Object.keys(koByRound)
           .sort((a, b) => Number(a) - Number(b))
@@ -73,21 +80,24 @@ const KOBracket = ({
                   const currentTop = getTopPosition(actualRoundIdx, matchIndex);
                   const nextTop = getTopPosition(actualRoundIdx + 1, Math.floor(matchIndex / 2));
 
-                  // Team-Herkunft Logik aus deinem Original
+                  // LOGIK: Woher kommen die Teams für dieses Spiel?
                   let teamA, teamB;
                   if (phase.id > 1 && isActiveTippingRound) {
+                    // Aus dem Speicher der aktuellen Phase
                     teamA = m.team_a || "?";
                     teamB = m.team_b || "?";
                   } else if (actualRoundIdx === 0) {
+                    // Erste Runde: Auflösung der Gruppen-Platzierungen (z.B. A1 gegen 1A)
                     const matchDef = KO_STRUCTURE.round16[matchIndex];
                     teamA = resolveSlot(matchDef[0], context);
                     teamB = resolveSlot(matchDef[1], context);
                   } else {
+                    // Folgerunden: Gewinner aus den vorherigen Spielen ziehen
                     teamA = getTeamFromPrevious(actualRoundIdx, matchIndex, "A");
                     teamB = getTeamFromPrevious(actualRoundIdx, matchIndex, "B");
                   }
 
-                  // Gewinner-Ermittlung Logik aus deinem Original
+                  // LOGIK: Wer hat das Spiel gewonnen? (Berücksichtigt Tore und manuelle Siegerwahl)
                   const winningSide = (() => {
                     if (!tip) return null;
                     const gA = (tip.goals_a !== null && tip.goals_a !== undefined && tip.goals_a !== "") ? Number(tip.goals_a) : null;
@@ -111,6 +121,7 @@ const KOBracket = ({
                         
                         <div style={BRACKET_STYLES.tipContainer}>
                           {isAdmin ? (
+                            // Admin-Ansicht: Immer volle Eingabe möglich
                             <TipInput 
                               teamA={teamA} teamB={teamB} isKO onSave={(a,b,w) => saveTip(m.id,a,b,w)} 
                               initialGoalsA={tip?.goals_a} initialGoalsB={tip?.goals_b} initialWinner={tip?.winner} 
@@ -119,6 +130,7 @@ const KOBracket = ({
                           ) : (
                             !phase?.is_submitted ? (
                               tip ? (
+                                // User-Ansicht: Gespeicherte Tipps anzeigen
                                 <div style={BRACKET_STYLES.savedTipDisplay}>
                                   {(tip.goals_a !== null && tip.goals_a !== undefined && tip.goals_a !== "") 
                                     ? `${tip.goals_a} : ${tip.goals_b}` 
@@ -130,6 +142,7 @@ const KOBracket = ({
                                   )}
                                 </div>
                               ) : (
+                                // User-Ansicht: Eingabefelder anzeigen
                                 (teamA !== "?" && teamB !== "?") ? (
                                   <TipInput 
                                     teamA={teamA} teamB={teamB} isKO onSave={(a,b,w) => saveTip(m.id,a,b,w)} 
@@ -140,6 +153,7 @@ const KOBracket = ({
                                 )
                               )
                             ) : (
+                              // Finale Ansicht nach Abgabe
                               <div style={BRACKET_STYLES.finalResult}>
                                 {tip?.goals_a !== null && tip?.goals_a !== undefined && tip?.goals_a !== "" 
                                   ? `${tip.goals_a} : ${tip.goals_b}` 
@@ -150,15 +164,18 @@ const KOBracket = ({
                         </div>
                       </div>
 
-                      {/* Dynamische Linien */}
+                      {/* DYNAMISCHE LINIEN: Zeichnet die Pfade zur nächsten Runde */}
                       {actualRoundIdx < 4 && (
                         <>
+                          {/* Horizontale Linie direkt aus der Box */}
                           <div style={BRACKET_STYLES.lineHorizontal} />
+                          {/* Vertikale Linie zur Mitte des nächsten Spiels */}
                           <div style={{ 
                             ...BRACKET_STYLES.lineVertical,
                             top: matchIndex % 2 === 0 ? "82px" : `calc(82px - ${Math.abs(nextTop - currentTop)}px)`, 
                             height: `${Math.abs(nextTop - currentTop)}px`, 
                           }} />
+                          {/* Verbindungsstück zum nächsten Spiel (nur bei jedem zweiten Match nötig) */}
                           {matchIndex % 2 === 0 && (
                             <div style={{ ...BRACKET_STYLES.lineHorizontal, top: `${(nextTop - currentTop) + 82}px`, right: "-60px" }} />
                           )}

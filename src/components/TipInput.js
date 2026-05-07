@@ -66,7 +66,7 @@ const TipInput = ({
   };
 
   /**
-   * Behandelt Änderungen an den Tore-Inputs
+   * Behandelt Änderungen an den Tore-Inputs (Zahlenfelder)
    */
   const handleInputChange = (val, field) => {
     let newA = goalsA;
@@ -87,7 +87,7 @@ const TipInput = ({
   return (
     <div style={containerStyle}>
       
-      {/* ⚽ TORE-INPUTS (Ausgeblendet bei onlyWinner-Modus) */}
+      {/* ⚽ TORE-INPUTS (Ausgeblendet, wenn nur der Sieger getippt werden soll) */}
       {!onlyWinner && (
         <div style={inputGroupStyle}>
           <input
@@ -108,7 +108,7 @@ const TipInput = ({
         </div>
       )}
 
-      {/* 🏆 SIEGER-DROPDOWN (Erscheint bei onlyWinner ODER Remis in KO-Phase) */}
+      {/* 🏆 SIEGER-DROPDOWN (Erscheint bei onlyWinner ODER bei Unentschieden in der KO-Phase) */}
       {(onlyWinner || (isKO && goalsA !== "" && goalsB !== "" && Number(goalsA) === Number(goalsB))) && (
         <select 
           value={winner} 
@@ -128,8 +128,7 @@ const TipInput = ({
   );
 };
 
-// --- STYLES ---
-
+// --- STYLES (Inline-CSS) ---
 const containerStyle = { display: "flex", flexDirection: "column", gap: "5px" };
 const inputGroupStyle = { display: "flex", alignItems: "center", justifyContent: "center", gap: "5px" };
 const dividerStyle = { fontWeight: "bold" };
