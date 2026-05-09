@@ -22,6 +22,12 @@ const Dashboard = ({ player, onLogout }) => {
     fetchDashboardData();
   }, []);
 
+  useEffect(() => {
+  if (activePhase === "ranking") {
+    fetchDashboardData();
+  }
+}, [activePhase]);
+
   /**
    * Lädt alle notwendigen Daten aus der Supabase-Datenbank.
    * Verwendet Promise.all für maximale Ladegeschwindigkeit.
@@ -169,7 +175,10 @@ const Dashboard = ({ player, onLogout }) => {
             {activePhase === "admin_control" ? (
               <AdminControlCenter onUpdate={fetchDashboardData} />
             ) : activePhase === "admin_results" ? (
-              <AdminResultsPage phaseId={systemConfig?.current_phase_id} />
+              <AdminResultsPage 
+                phaseId={systemConfig?.current_phase_id} 
+                onUpdate={fetchDashboardData} 
+              />
             ) : (
               <TippsPage player={player} phaseId={activePhase} isAdmin={player.is_admin} />
             )}

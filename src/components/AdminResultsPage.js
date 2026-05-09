@@ -4,6 +4,8 @@ import { calculateTable } from "../logic/tournamentLogic";
 import { getTopPosition, resolveSlot, getTeamFromPrevious } from "../logic/koLogic";
 import { getBestThirds } from "../Utils/calcTable";
 import { calculateDetailedMatchPoints, getDynamicWinnerPoints } from "../logic/pointsEngine";
+import { syncRealTournamentState } from "../logic/realStateSync";
+import { processPrognosisPoints } from "../logic/pointsEngine";
 
 // Komponenten
 import GroupTable from './GroupTable';
@@ -22,7 +24,7 @@ const KO_STRUCTURE = {
 const ROUND_NAMES = { 1: "Sechzehntelfinale", 2: "Achtelfinale", 3: "Viertelfinale", 4: "Halbfinale", 5: "Finale" };
 const TREE_HEIGHT = 2000;
 
-function AdminResultsPage({ phaseId }) {
+function AdminResultsPage({ phaseId, onUpdate }) {
   const [matches, setMatches] = useState([]);
   const [loading, setLoading] = useState(true);
   const groupRef = useRef(null);
@@ -59,90 +61,81 @@ function AdminResultsPage({ phaseId }) {
    * Kern-Funktion: Speichert Ergebnis und berechnet Punkte für ALLE User
    */
   async function saveRealResult(matchId, goalsA, goalsB, winner) {
-    if (goalsA === "" || goalsB === "") return;
+  if (goalsA === "" || goalsB === "") return;
 
-    const gA = Number(goalsA);
-    const gB = Number(goalsB);
+  const gA = Number(goalsA);
+  const gB = Number(goalsB);
+  
+  let finalWinner = 0;
+  if (gA > gB) finalWinner = 1;
+  else if (gB > gA) finalWinner = 2;
+  if (gA === gB && winner) finalWinner = Number(winner);
+
+  // 1. Reales Ergebnis im Match speichern
+  const { error: matchError } = await supabase
+    .from("match")
+    .update({
+      goals_a_real: gA,
+      goals_b_real: gB,
+      winner_real: finalWinner
+    })
+    .eq("id", matchId);
     
-    let finalWinner = 0;
-    if (gA > gB) finalWinner = 1;
-    else if (gB > gA) finalWinner = 2;
-    if (gA === gB && winner) finalWinner = Number(winner);
+  if (matchError) return console.error("Match Update Error:", matchError.message);
 
-    // 1. Reales Ergebnis im Match speichern
-    const { error: matchError } = await supabase
-      .from("match")
-      .update({
-        goals_a_real: gA,
-        goals_b_real: gB,
-        winner_real: finalWinner
-      })
-      .eq("id", matchId);
-      
-    if (matchError) return console.error("Match Update Error:", matchError.message);
+  // --- NEU: TURNIERSTATUS SYNCHRONISIEREN ---
+  // Wir laden alle Matches neu, um den aktuellen Gesamtzustand zu haben
+  const { data: allMatches } = await supabase.from("match").select("*").order("match_order");
+  const currentMatch = allMatches.find(m => m.id === matchId);
 
-    // 2. Match-Daten für FIFA-Ranking holen
-    const { data: currentMatch } = await supabase
-      .from("match")
-      .select("team_a, team_b")
-      .eq("id", matchId)
-      .single();
+  // Diese Funktion (aus dem vorherigen Schritt) befüllt real_group_state & real_ko_state
+  await syncRealTournamentState(allMatches, currentMatch.group_name);
+  // ------------------------------------------
 
-    const winnerPoints = await fetchWinnerPoints(currentMatch.team_a, currentMatch.team_b);
+  // 2. Match-Daten für FIFA-Ranking (Basis-Punkte für den Sieg)
+  const winnerPoints = await fetchWinnerPoints(currentMatch.team_a, currentMatch.team_b);
 
-    // 3. Tipps aus Tabelle "tip" laden
-    const { data: allTips, error: tipsError } = await supabase
-      .from("tip")
-      .select("*")
-      .eq("match_id", matchId);
+  // 3. Tipps aus Tabelle "tip" laden
+  const { data: allTips } = await supabase.from("tip").select("*").eq("match_id", matchId);
 
-    if (tipsError) return console.error("Fehler beim Laden der Tipps:", tipsError.message);
+  // 4. Alte Punkte-Details für dieses Spiel löschen (auch Prognose-Punkte dieses Matches, falls vorhanden)
+  await supabase.from("user_points_detail").delete().eq("match_id", matchId);
 
-    // 4. Alte Punkte-Details für dieses Spiel löschen
-    await supabase
-      .from("user_points_detail")
-      .delete()
-      .eq("match_id", matchId);
+  // 5. Match-Punkte für jeden User berechnen
+  if (allTips && allTips.length > 0) {
+    const pointsToInsert = allTips.map(t => {
+      const result = calculateDetailedMatchPoints(
+        { goals_a: t.goals_a, goals_b: t.goals_b, winner: t.winner },
+        { goals_a: gA, goals_b: gB, winner: finalWinner },
+        winnerPoints
+      );
 
-    // 5. Punkte für jeden User berechnen
-    if (allTips && allTips.length > 0) {
-      const pointsToInsert = allTips.map(t => {
-        // Hier nutzen wir die Spaltennamen aus deinem Screenshot: t.goals_a, t.goals_b, t.winner
-        const result = calculateDetailedMatchPoints(
-          { 
-            goals_a: t.goals_a, 
-            goals_b: t.goals_b, 
-            winner: t.winner 
-          },
-          { goals_a: gA, goals_b: gB, winner: finalWinner },
-          winnerPoints
-        );
+      return {
+        player_id: t.player_id,
+        match_id: matchId,
+        phase_id: phaseId,
+        group_name: currentMatch.group_name,
+        points_total: result.total,
+        breakdown: result.breakdown,
+        category: 'MATCH',
+        is_prognosis: false
+      };
+    });
 
-        return {
-          player_id: t.player_id, // GEÄNDERT: Dein Screenshot zeigt "player_id"
-          match_id: matchId,
-          points_total: result.total,
-          breakdown: result.breakdown,
-          is_prognosis: false
-        };
-      });
-
-      // 6. In user_points_detail schreiben
-      const { error: insertError } = await supabase
-        .from("user_points_detail")
-        .insert(pointsToInsert);
-
-      if (insertError) {
-        console.error("Fehler beim Speichern der Punkte:", insertError.message);
-      } else {
-        console.log(`Erfolgreich Punkte für ${allTips.length} Tipper berechnet.`);
-      }
-    } else {
-      console.log("Keine Tipps für dieses Spiel gefunden.");
-    }
-
-    fetchMatches(); // UI aktualisieren
+    await supabase.from("user_points_detail").insert(pointsToInsert);
   }
+
+  // --- NEU: PROGNOSE- & TABELLENPUNKTE VERGEBEN ---
+  // Jetzt prüfen wir, ob durch dieses Match Gruppen fertig wurden oder KO-Runden erreicht wurden
+  await processPrognosisPoints(allMatches, currentMatch);
+  // -----------------------------------------------
+
+  if (onUpdate) {
+    onUpdate();
+  }
+
+  fetchMatches(); // UI aktualisieren
+}
 
   if (loading) return <div style={{ padding: "20px" }}>Lade Admin-Daten...</div>;
 

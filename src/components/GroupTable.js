@@ -61,11 +61,19 @@ const GroupTable = ({
                   
                   {/* Anzeige: Entweder der gespeicherte Tipp oder das Eingabefeld */}
                   <div style={GROUP_TABLE_STYLES.scoreDisplayContainer}>
-                    {tip ? (
-                      <div style={GROUP_TABLE_STYLES.savedScore}>{tip.goals_a} : {tip.goals_b}</div>
+                    {(isAdmin || !tip) ? (
+                      <div style={GROUP_TABLE_STYLES.scoreDisplayContainer}>
+                        <TipInput 
+                          isKO={false} 
+                          // Wir übergeben die vorhandenen Werte als Default, damit man sie überschreiben kann
+                          initialGoalsA={tip?.goals_a} 
+                          initialGoalsB={tip?.goals_b}
+                          onSave={(a, b, w) => onSaveTip(m.id, a, b, w)} 
+                        />
+                      </div>
                     ) : (
-                      !isSubmitted && <TipInput isKO={false} onSave={(a, b, w) => onSaveTip(m.id, a, b, w)} />
-                    )}
+                      <div style={GROUP_TABLE_STYLES.savedScore}>{tip.goals_a} : {tip.goals_b}</div>
+                    )}  
                   </div>
 
                   <div style={GROUP_TABLE_STYLES.teamBContainer}>
