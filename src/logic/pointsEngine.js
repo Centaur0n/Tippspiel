@@ -12,8 +12,8 @@ export const POINTS_CONFIG = {
 
   // Prognosen / Finalrunde
   PROG_REACH_16: 5,
-  PROG_OUT_16: 5,
-  PROG_REACH_8: 5,
+  PROG_OUT_16: 6,
+  PROG_REACH_8: 6,
   PROG_OUT_8: 5,
   PROG_REACH_4: 10,
   PROG_OUT_4: 5,

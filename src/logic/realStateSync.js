@@ -1,6 +1,7 @@
 import { supabase } from "../supabaseClient";
 import { calculateFIFADataTable } from "./tournamentLogic";
 import { getBestThirds } from "../Utils/calcTable";
+import { resolveSlot } from "./koLogic"; 
 
 /**
  * Kernfunktion: Synchronisiert den realen Turnierverlauf in die DB
@@ -24,22 +25,21 @@ export async function syncRealTournamentState(matches, groupName = null) {
   }));
 
   // 3. BEST THIRDS & 32 QUALIFIER POOL BERECHNUNG
-  // Alle 12 Dritten nach FIFA-Kriterien sortieren
   const allThirdsSorted = getBestThirds(allTables);
   
-  // Die 8 besten Dritten (kommen weiter)
-  const best8ThirdsReal = allThirdsSorted.slice(0, 8).map(t => t.team);
-  
-  // Die 4 schlechtesten Dritten (scheiden aus)
+  // WICHTIG: Wir speichern hier Objekte mit team UND group für den Mapper
+  const best8ThirdsReal = allThirdsSorted.slice(0, 8).map(t => ({
+    team: t.team,
+    group: t.group 
+  }));
+
   const worst4ThirdsReal = allThirdsSorted.slice(8, 12).map(t => t.team);
-
-  // Echte Top 2 jeder Gruppe (24 Teams)
   const top24Real = allTables.flatMap(t => t.teams.slice(0, 2).map(teamObj => teamObj.team));
+  
+  // Für die statistische Übersicht (nur Namen)
+  const finalReached16 = [...top24Real, ...best8ThirdsReal.map(t => t.team)].filter(name => name && !name.includes("Placeholder"));
 
-  // Der vollständige Pool der 32 Teams für reached_16
-  const finalReached16 = [...top24Real, ...best8ThirdsReal].filter(name => name && !name.includes("Placeholder"));
-
-  // 4. GRUPPEN-STATES AKTUALISIEREN (inkl. der neuen Dropped-Out Logik)
+  // 4. GRUPPEN-STATES AKTUALISIEREN
   for (const groupData of allTables) {
     const gName = groupData.id;
     const table = groupData.teams;
@@ -51,12 +51,8 @@ export async function syncRealTournamentState(matches, groupName = null) {
     if (isFinished) {
       const groupFourth = table[3]?.team;
       const groupThird = table[2]?.team;
-
-      // Sammelbecken für alle, die in dieser Gruppe ausscheiden
       const finalDroppedOut = [];
       if (groupFourth) finalDroppedOut.push(groupFourth);
-      
-      // Falls der Gruppendritte zu den 4 schlechtesten Dritten des Turniers gehört:
       if (groupThird && worst4ThirdsReal.includes(groupThird)) {
         finalDroppedOut.push(groupThird);
       }
@@ -68,10 +64,9 @@ export async function syncRealTournamentState(matches, groupName = null) {
         rank_3: table[2]?.team || null,
         rank_4: table[3]?.team || null,
         reached_ko: table.slice(0, 2).map(t => t.team), 
-        dropped_out: finalDroppedOut, // Hier sind jetzt ggf. 2 Teams drin
+        dropped_out: finalDroppedOut,
         is_finished: true
       };
-
       await supabase.from("real_group_state").upsert(record);
     }
   }
@@ -83,8 +78,8 @@ export async function syncRealTournamentState(matches, groupName = null) {
     const stageMatches = koMatches.filter(m => m.stage_order === stageOrder);
     const teams = [];
     stageMatches.forEach(m => {
-      if (m.team_a && !m.team_a.includes("Placeholder")) teams.push(m.team_a);
-      if (m.team_b && !m.team_b.includes("Placeholder")) teams.push(m.team_b);
+      if (m.team_a && !isPlaceholder(m.team_a)) teams.push(m.team_a);
+      if (m.team_b && !isPlaceholder(m.team_b)) teams.push(m.team_b);
     });
     return [...new Set(teams)];
   };
@@ -115,4 +110,54 @@ export async function syncRealTournamentState(matches, groupName = null) {
   };
 
   await supabase.from("real_ko_state").upsert(realKOUpdate);
+
+  // --- KO-MATCH TEAMS IN DER 'MATCH' TABELLE AKTUALISIEREN ---
+  await updateKOMatchLabels(matches, allTables, best8ThirdsReal, realTips);
+}
+
+/**
+ * Hilfsfunktion zum Updaten der Teamnamen in der match-Tabelle
+ */
+async function updateKOMatchLabels(matches, allTables, best8ThirdsReal, realTips) {
+  const groupResults = {};
+  allTables.forEach(t => {
+    groupResults[t.id] = t.teams.map(teamObj => teamObj.team);
+  });
+
+  const tournamentContext = {
+    groups: groupResults,
+    thirdPlaces: best8ThirdsReal, // Hier sind jetzt {team, group} Objekte drin
+    tips: realTips,
+    phaseId: 1
+  };
+
+  const koMatches = matches.filter(m => m.stage === "ko");
+
+  for (const m of koMatches) {
+    // Falls kein expliziter Placeholder gespeichert ist, nutzen wir den aktuellen Wert
+    const currentA = m.placeholder_a || m.team_a;
+    const currentB = m.placeholder_b || m.team_b;
+
+    const newTeamA = resolveSlot(currentA, tournamentContext);
+    const newTeamB = resolveSlot(currentB, tournamentContext);
+
+    // Update nur wenn sich wirklich etwas geändert hat (verhindert unnötige DB-Calls)
+    if (newTeamA !== m.team_a || newTeamB !== m.team_b) {
+      await supabase
+        .from("match")
+        .update({ team_a: newTeamA, team_b: newTeamB })
+        .eq("id", m.id);
+    }
+  }
+}
+
+/**
+ * Hilfsfunktion um zu prüfen, ob ein String ein Platzhalter ist
+ */
+function isPlaceholder(str) {
+  if (!str) return false;
+  if (str.includes("Placeholder")) return true;
+  // Erkennt A1, 1A, Winner, Loser UND die langen FIFA-Codes (z.B. ABCDF3)
+  const placeholderRegex = /^([A-L][1-4]|[1-4][A-L]|Winner|Loser|1[A-L]|2[A-L]|3[A-L]|[A-L]{3,}\d?)/i;
+  return placeholderRegex.test(str);
 }
