@@ -6,7 +6,13 @@ import { BEST_THIRDS_STYLES } from '../Utils/uiConstants';
  * BestThirdsTable: Komponente zur Darstellung der Rangliste der Gruppendritten.
  * Nutzt nun zentralisierte Styles aus uiConstants.
  */
-function BestThirdsTable({ teams, manualRanks = {}, onSaveManualRank, isSubmitted }) {
+function BestThirdsTable({ 
+  teams, 
+  manualRanks = {}, 
+  onSaveManualRank, 
+  isSubmitted, 
+  canEditRanks = true
+}) {
   
   if (!teams || teams.length === 0) return null;
 
@@ -61,14 +67,29 @@ function BestThirdsTable({ teams, manualRanks = {}, onSaveManualRank, isSubmitte
                     min="1"
                     placeholder="Rang"
                     value={manualRanks[displayName] || ""}
-                    onChange={(e) => onSaveManualRank(displayName, e.target.value)}
-                    disabled={isSubmitted}
-                    style={BEST_THIRDS_STYLES.tieInput}
+                    // ABSICHERUNG: Nur rufen, wenn Funktion da ist UND editiert werden darf
+                    onChange={(e) => {
+                      if (typeof onSaveManualRank === 'function' && canEditRanks) {
+                        onSaveManualRank(displayName, e.target.value);
+                      }
+                    }}
+                    // Input sperren, wenn Phase abgegeben oder Admin noch nicht alle Spiele hat
+                    disabled={isSubmitted || !canEditRanks}
+                    style={{
+                      ...BEST_THIRDS_STYLES.tieInput,
+                      backgroundColor: (!canEditRanks) ? "#edf2f7" : "white",
+                      cursor: (!canEditRanks) ? "not-allowed" : "text"
+                    }}
                   />
                 </div>
               );
             })}
           </div>
+          {!canEditRanks && (
+            <p style={{ color: "#e53e3e", fontSize: "0.75rem", marginTop: "10px" }}>
+              * Eingabe erst möglich, wenn alle Gruppenspiele eingetragen sind.
+            </p>
+          )}
         </div>
       )}
 

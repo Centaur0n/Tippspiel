@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from "react";
 import { supabase } from "../supabaseClient";
-import { calculateTable } from "../logic/tournamentLogic";
+import { calculateFIFADataTable } from "../logic/tournamentLogic"; // Nutze FIFA Logik wie in TippsPage
 import { getTopPosition, resolveSlot, getTeamFromPrevious } from "../logic/koLogic";
 import { getBestThirds } from "../Utils/calcTable";
 import { calculateDetailedMatchPoints, getDynamicWinnerPoints } from "../logic/pointsEngine";
@@ -52,6 +52,7 @@ function AdminResultsPage({ phaseId, onUpdate }) {
     setManualRanks(rankMap);
   }
 
+  // --- MANUELLER RANG SPEICHERN ---
   async function saveAdminManualRank(teamName, rank) {
     const val = rank === "" ? null : Number(rank);
     const { error } = await supabase
@@ -61,7 +62,33 @@ function AdminResultsPage({ phaseId, onUpdate }) {
     if (error) return console.error("Admin Rank Error:", error.message);
     
     setManualRanks(prev => ({ ...prev, [teamName]: val }));
+    // Wir triggern sync & prognosis neu, falls ein Rang den Aufstieg ändert
+    const { data: allMatches } = await supabase.from("match").select("*").order("match_order");
+    const lastGroupMatch = allMatches.filter(m => m.stage === "group").pop();
+    await syncRealTournamentState(allMatches, lastGroupMatch.group_name);
+    await processPrognosisPoints(allMatches, lastGroupMatch);
+    
+    if (onUpdate) onUpdate();
     fetchMatches(); 
+  }
+
+  // --- RESET DER RÄNGE BEI SPIELÄNDERUNG ---
+  async function resetManualRanksForGroup(groupName) {
+    const groupMatches = matches.filter(m => m.group_name === groupName);
+    const teamsInGroup = [...new Set(groupMatches.flatMap(m => [m.team_a, m.team_b]))];
+    
+    const { error } = await supabase
+      .from("real_manual_rank")
+      .delete()
+      .in("team_name", teamsInGroup);
+
+    if (!error) {
+      setManualRanks(prev => {
+        const newRanks = { ...prev };
+        teamsInGroup.forEach(t => delete newRanks[t]);
+        return newRanks;
+      });
+    }
   }
 
   async function fetchWinnerPoints(teamA, teamB) {
@@ -76,6 +103,7 @@ function AdminResultsPage({ phaseId, onUpdate }) {
     return getDynamicWinnerPoints(rankA, rankB);
   }
 
+  // --- REALES ERGEBNIS SPEICHERN ---
   async function saveRealResult(matchId, goalsA, goalsB, winner) {
     if (goalsA === "" || goalsB === "") return;
 
@@ -87,7 +115,13 @@ function AdminResultsPage({ phaseId, onUpdate }) {
     else if (gB > gA) finalWinner = 2;
     if (gA === gB && winner) finalWinner = Number(winner);
 
-    // 1. Das Spiel in der DB speichern
+    const currentMatchBefore = matches.find(m => m.id === matchId);
+
+    // Sicherheits-Reset: Wenn Gruppenspiel, lösche manuelle Ränge dieser Gruppe
+    if (currentMatchBefore?.stage === "group") {
+      await resetManualRanksForGroup(currentMatchBefore.group_name);
+    }
+
     const { error: matchError } = await supabase
       .from("match")
       .update({ goals_a_real: gA, goals_b_real: gB, winner_real: finalWinner })
@@ -95,20 +129,15 @@ function AdminResultsPage({ phaseId, onUpdate }) {
       
     if (matchError) return console.error("Match Update Error:", matchError.message);
 
-    // 2. Frische Daten holen
     const { data: allMatches } = await supabase.from("match").select("*").order("match_order");
     const currentMatch = allMatches.find(m => m.id === matchId);
 
-    // 3. SYNCHRONISATION (Wichtig: AWAIT nutzen!)
-    // Wir triggern die Synchronisation bei JEDEM Spiel, 
-    // damit real_ko_state immer aktuell ist, bevor wir Punkte berechnen.
     await syncRealTournamentState(allMatches, currentMatch.group_name);
 
-    // 4. Punkte-Berechnung für das Match-Ergebnis (Tipps)
     const winnerPoints = await fetchWinnerPoints(currentMatch.team_a, currentMatch.team_b);
     const { data: allTips } = await supabase.from("tip").select("*").eq("match_id", matchId);
 
-    await supabase.from("user_points_detail").delete().eq("match_id", matchId);
+    await supabase.from("user_points_detail").delete().eq("match_id", matchId).eq("is_prognosis", false);
 
     if (allTips && allTips.length > 0) {
       const pointsToInsert = allTips.map(t => {
@@ -130,14 +159,11 @@ function AdminResultsPage({ phaseId, onUpdate }) {
           is_prognosis: false
         };
       });
-      
       await supabase.from("user_points_detail").insert(pointsToInsert);
     }
 
-    // 5. PROGNOSE-PUNKTE (Wartet jetzt, bis syncRealTournamentState fertig ist)
     await processPrognosisPoints(allMatches, currentMatch);
 
-    // 6. UI Update
     if (onUpdate) onUpdate();
     await fetchMatches(); 
   }
@@ -147,10 +173,7 @@ function AdminResultsPage({ phaseId, onUpdate }) {
   const realResultsAsTips = {};
   matches.forEach(m => {
     realResultsAsTips[m.id] = {
-      match_id: m.id,
-      goals_a: m.goals_a_real,
-      goals_b: m.goals_b_real,
-      winner: m.winner_real
+      match_id: m.id, goals_a: m.goals_a_real, goals_b: m.goals_b_real, winner: m.winner_real
     };
   });
 
@@ -162,30 +185,12 @@ function AdminResultsPage({ phaseId, onUpdate }) {
 
   const allGroupsArray = Object.keys(grouped).map(groupName => {
     const groupMatches = grouped[groupName];
-    const tipsForCalc = {};
-
-    // NUR Spiele berücksichtigen, die wirklich ein Ergebnis haben
-    const playedMatches = groupMatches.filter(m => 
-      m.goals_a_real !== null && m.goals_b_real !== null
-    );
-
-    playedMatches.forEach(m => {
-      tipsForCalc[m.id] = {
-        match_id: m.id,
-        goals_a: m.goals_a_real,
-        goals_b: m.goals_b_real,
-        winner: m.winner_real
-      };
-    });
-
     return {
       id: groupName,
-      // calculateTable bekommt jetzt nur noch die tatsächlich gespielten Matches
-      teams: calculateTable(groupMatches, tipsForCalc, manualRanks)
+      teams: calculateFIFADataTable(groupMatches, realResultsAsTips, manualRanks)
     };
   });
 
-  // Checken, ob ALLE Gruppenspiele des gesamten Turniers fertig sind
   const allGroupGamesFinished = matches
     .filter(m => m.stage === "group")
     .every(m => m.goals_a_real !== null && m.goals_b_real !== null);
@@ -217,7 +222,8 @@ function AdminResultsPage({ phaseId, onUpdate }) {
         <h2 style={{ color: "#dc2626" }}>Admin: Gruppen</h2>
         {Object.keys(grouped).sort().map(name => {
           const groupMatches = grouped[name];
-          // 2. Prüfen, ob alle 6 Spiele dieser spezifischen Gruppe fertig sind
+          
+          // Prüfen, ob alle 6 Spiele der Gruppe ein Ergebnis haben
           const groupFinished = groupMatches.every(m => 
             m.goals_a_real !== null && m.goals_b_real !== null
           );
@@ -231,18 +237,29 @@ function AdminResultsPage({ phaseId, onUpdate }) {
               tableData={allGroupsArray.find(g => g.id === name)?.teams || []} 
               onSaveTip={saveRealResult} 
               isSubmitted={false}
-              isAdmin={true} 
+              isAdmin={true} // Hier setzen wir isAdmin hart auf true, da wir auf der Admin-Page sind
               manualRanks={manualRanks}
-              // Nur übergeben, wenn Gruppe fertig ist
-              onSaveManualRank={groupFinished ? saveAdminManualRank : null}
+              
+              // KORREKTUR DER FEHLERZEILEN:
+              onSaveManualRank={(teamName, rank) => {
+                // Wir prüfen groupFinished (die Variable von oben)
+                // Und wir nutzen saveAdminManualRank (deine Funktion aus der Page)
+                if (groupFinished) {
+                  saveAdminManualRank(teamName, rank);
+                } else {
+                  console.warn("Manuelle Reihung erst nach allen Gruppenspielen möglich.");
+                }
+              }}
             />
           );
         })}
         <BestThirdsTable 
           teams={bestThirds} 
           manualRanks={manualRanks}
-          // Nur übergeben, wenn das komplette Turnier (Gruppenphase) fertig ist
-          onSaveManualRank={allGroupGamesFinished ? saveAdminManualRank : null}
+          isSubmitted={false}
+          isAdmin={true}
+          onSaveManualRank={saveAdminManualRank}
+          canEditRanks={allGroupGamesFinished}
         />
       </div>
 

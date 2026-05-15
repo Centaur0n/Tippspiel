@@ -139,9 +139,18 @@ const GroupTable = ({
                     <span style={{fontSize: '0.85rem', fontWeight: '500'}}>{row.team}</span>
                   </div>
                   <input 
-                    type="number" min="1" max="4"
+                    type="number" 
+                    min="1" 
+                    max="4"
                     value={manualRanks[row.team] || ""}
-                    onChange={(e) => onSaveManualRank(row.team, e.target.value)}
+                    onChange={(e) => {
+                      // Prüfen, ob die Prop existiert und eine Funktion ist
+                      if (typeof onSaveManualRank === 'function') {
+                        onSaveManualRank(row.team, e.target.value);
+                      } else {
+                        console.warn("onSaveManualRank wurde nicht als Funktion übergeben.");
+                      }
+                    }}
                     disabled={isSubmitted}
                     style={GROUP_TABLE_STYLES.manualRankInput}
                     placeholder="-"
