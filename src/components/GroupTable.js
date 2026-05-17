@@ -17,7 +17,10 @@ const GroupTable = ({
 }) => {
 
   // Prüft, ob für alle Spiele dieser Gruppe bereits Tipps abgegeben wurden
-  const isGroupFinished = matches.every(m => tips[m.id] !== undefined);
+  const isGroupFinished = matches.every(m => 
+    m.goals_a_real !== null && m.goals_a_real !== undefined && m.goals_a_real !== "" &&
+    m.goals_b_real !== null && m.goals_b_real !== undefined && m.goals_b_real !== ""
+  );
 
   // ERMITTLUNG VON GLEICHSTAND:
   // Sucht nach Teams, die exakt dieselben Punkte, Differenz und Tore haben

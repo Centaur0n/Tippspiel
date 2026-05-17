@@ -2,7 +2,7 @@ import { supabase } from "../supabaseClient";
 import { calculateFIFADataTable } from "./tournamentLogic";
 import { getBestThirds } from "../Utils/calcTable";
 import { resolveSlot } from "./koLogic"; 
-import { processPrognosisPoints } from "./pointsEngine"; // Importiert für den finalen Loop
+import { processPrognosisPoints } from "./pointsEngine";
 
 /**
  * Kernfunktion: Synchronisiert den realen Turnierverlauf in die DB
@@ -72,7 +72,7 @@ export async function syncRealTournamentState(matches, groupName = null) {
       const isBestThird = best8ThirdsReal.some(bt => bt.team === groupThird);
       const groupBestThirdsForDB = isBestThird ? [groupThird] : [];
 
-      // WICHTIG: Wenn das Turnier vorbei ist, wissen wir sicher, welche 3. ausscheiden
+      // Wenn das gesamte Gruppen-Turnier vorbei ist, wissen wir sicher, welche 3. ausscheiden
       if (allGroupGamesFinished && groupThird && worst4ThirdsReal.includes(groupThird)) {
         finalDroppedOut.push(groupThird);
       }
@@ -163,14 +163,19 @@ export async function syncRealTournamentState(matches, groupName = null) {
 
   // --- FINALER LOOP FÜR PUNKTE (SPIEL 72 ANKER) ---
   if (allGroupGamesFinished) {
-    // Finde das Anker-Spiel (Spiel 72)
     const anchorMatch = matches.find(m => m.match_order === 72);
     
     if (anchorMatch) {
-      // Loop über alle Gruppen, um die Punkte für Gruppendritte (KO-Einzug/Ausscheiden)
-      // nachträglich dem Spiel 72 zuzuordnen.
+      // Lösche vor dem Gruppendritten-Loop gezielt nur die Einträge, die direkt an Spiel 72 hängen
+      await supabase.from("user_points_detail")
+        .delete()
+        .eq("match_id", anchorMatch.id)
+        .eq("is_prognosis", true);
+
+      // Loop über alle Gruppen, um ausschließlich die Gruppendritten auszuwerten
       for (const groupName of allGroups) {
-        await processPrognosisPoints(matches, anchorMatch, groupName);
+        // Parameter 'isFinalThirdsLoop' wird auf true gesetzt
+        await processPrognosisPoints(matches, anchorMatch, groupName, true);
       }
     }
   }

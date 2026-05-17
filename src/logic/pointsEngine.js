@@ -85,7 +85,7 @@ export const getDynamicWinnerPoints = (rankA, rankB) => {
 /**
  * HAUPTFUNKTION: Vergleicht User-Prognosen mit dem realen Turnierstand
  */
-export async function processPrognosisPoints(allMatches, currentMatch, forcedGroupName = null) {
+export async function processPrognosisPoints(allMatches, currentMatch, forcedGroupName = null, isFinalThirdsLoop = false) {
   if (currentMatch.goals_a_real === null || currentMatch.goals_b_real === null) return;
 
   const { id: mId, match_order: mOrder, stage, stage_order } = currentMatch;
@@ -105,34 +105,75 @@ export async function processPrognosisPoints(allMatches, currentMatch, forcedGro
 
   // --- A. GRUPPEN-PUNKTE ---
   if (stage === "group" && realGroup.is_finished) {
-    const { data: userGroupProgs } = await supabase.from("user_prognosis_group").select("*").eq("group_name", activeGroupName);
+    const groupMatches = allMatches.filter(m => m.group_name === activeGroupName);
+    const lastMatchOfThisGroup = groupMatches.reduce((max, m) => 
+      m.match_order > max.match_order ? m : max, 
+      groupMatches[0]
+    );
 
-    if (userGroupProgs) {
-      userGroupProgs.forEach(prog => {
-        // 1. Tabellenplätze (Striktes Matching)
-        ['rank_1', 'rank_2', 'rank_3', 'rank_4'].forEach((rankKey) => {
-          if (prog[rankKey] === realGroup[rankKey] && realGroup[rankKey] !== null) {
-            pointsEntries.push(createPointEntry(prog.player_id, 'GROUP_RANK', POINTS_CONFIG.PROG_TABLE_POS, prog[rankKey], 1, activeGroupName, mId, mOrder));
+    // Ausführung erlaubt bei echtem letzten Gruppenspiel ODER im finalen Spiel-72-Loop
+    if (currentMatch.id === lastMatchOfThisGroup?.id || isFinalThirdsLoop) {
+      const { data: userGroupProgs } = await supabase.from("user_prognosis_group").select("*").eq("group_name", activeGroupName);
+
+      if (userGroupProgs) {
+        userGroupProgs.forEach(prog => {
+          
+          // I. REGULÄRE AUSWERTUNG (Wird im Spiel 72 Loop ignoriert, da dort Match-IDs verschoben wären)
+          if (!isFinalThirdsLoop) {
+            // 1. Tabellenplätze
+            ['rank_1', 'rank_2', 'rank_3', 'rank_4'].forEach((rankKey) => {
+              if (prog[rankKey] === realGroup[rankKey] && realGroup[rankKey] !== null) {
+                pointsEntries.push(createPointEntry(prog.player_id, 'GROUP_RANK', POINTS_CONFIG.PROG_TABLE_POS, prog[rankKey], 1, activeGroupName, mId, mOrder));
+              }
+            });
+
+            // 2. Regulärer KO-Einzug (Direktqualifikanten Platz 1 & 2)
+            const userQualifiers = [...(prog.reached_ko || [])];
+            const realQualifiers = [...(realGroup.reached_ko || [])];
+
+            userQualifiers.forEach(team => {
+              if (team && realQualifiers.includes(team)) {
+                pointsEntries.push(createPointEntry(prog.player_id, 'PROGNOSIS_PATH', POINTS_CONFIG.PROG_REACH_16, team, 1, activeGroupName, mId, mOrder, { original: POINTS_CONFIG.PROG_REACH_16 }));
+              }
+            });
+
+            // 3. Reguläres Ausscheiden (Fester Platz 4)
+            const userDroppedOut = [...(prog.dropped_out || [])];
+            const realDroppedOut = [...(realGroup.dropped_out || [])];
+
+            userDroppedOut.forEach(team => {
+              if (team && realDroppedOut.includes(team) && team === realGroup.rank_4) {
+                pointsEntries.push(createPointEntry(prog.player_id, 'PROGNOSIS_PATH', POINTS_CONFIG.PROG_OUT_VORRUNDE, team, 1, activeGroupName, mId, mOrder, { original: POINTS_CONFIG.PROG_OUT_VORRUNDE }));
+              }
+            });
           }
-        });
 
-        // 2. KO-Einzug: Nur Punkte, wenn das Team beim User als "Qualifiziert" steht UND real qualifiziert ist
-        const userQualifiers = [...(prog.reached_ko || []), ...(prog.reached_ko_best_thirds || [])];
-        const realQualifiers = [...(realGroup.reached_ko || []), ...(realGroup.reached_ko_best_thirds || [])];
+          // II. SPEZIELLE GRUPPENDRITTEN-LOGIK (Wird exklusiv über Spiel 72 getriggert)
+          if (isFinalThirdsLoop) {
+            const groupThirdTeam = realGroup.rank_3;
 
-        userQualifiers.forEach(team => {
-          if (team && realQualifiers.includes(team)) {
-            pointsEntries.push(createPointEntry(prog.player_id, 'PROGNOSIS_PATH', POINTS_CONFIG.PROG_REACH_16, team, 1, activeGroupName, mId, mOrder, { original: POINTS_CONFIG.PROG_REACH_16 }));
+            if (groupThirdTeam) {
+              // Fall 1: Der Gruppendritte kommt über die "Besten Dritten" real WEITER
+              const realThirdsReachedKO = realGroup.reached_ko_best_thirds || [];
+              if (realThirdsReachedKO.includes(groupThirdTeam)) {
+                const userExpectedQualifiers = [...(prog.reached_ko || []), ...(prog.reached_ko_best_thirds || [])];
+                if (userExpectedQualifiers.includes(groupThirdTeam)) {
+                  pointsEntries.push(createPointEntry(prog.player_id, 'PROGNOSIS_PATH', POINTS_CONFIG.PROG_REACH_16, groupThirdTeam, 1, activeGroupName, mId, mOrder, { original: POINTS_CONFIG.PROG_REACH_16 }));
+                }
+              }
+
+              // Fall 2: Der Gruppendritte SCHEIDET als einer der 4 schlechtesten Dritten real AUS
+              const realDroppedOut = realGroup.dropped_out || [];
+              if (realDroppedOut.includes(groupThirdTeam)) {
+                if (prog.dropped_out?.includes(groupThirdTeam)) {
+                  pointsEntries.push(createPointEntry(prog.player_id, 'PROGNOSIS_PATH', POINTS_CONFIG.PROG_OUT_VORRUNDE, groupThirdTeam, 1, activeGroupName, mId, mOrder, { original: POINTS_CONFIG.PROG_OUT_VORRUNDE }));
+                }
+              }
+            }
           }
-        });
 
-        // 3. Ausscheiden: Nur Punkte, wenn das Team beim User als "Raus" markiert ist UND real in dropped_out steht
-        prog.dropped_out?.forEach(team => {
-          if (team && realGroup.dropped_out?.includes(team)) {
-            pointsEntries.push(createPointEntry(prog.player_id, 'PROGNOSIS_PATH', POINTS_CONFIG.PROG_OUT_VORRUNDE, team, 1, activeGroupName, mId, mOrder, { original: POINTS_CONFIG.PROG_OUT_VORRUNDE }));
-          }
         });
-      });
+      }
     }
   }
 
@@ -172,7 +213,8 @@ export async function processPrognosisPoints(allMatches, currentMatch, forcedGro
   }
 
   // --- C. SPEICHERN & CLEANUP ---
-  if (stage === "group" && realGroup?.is_finished) {
+  // Wenn wir im regulären Fluss sind, löschen wir alte Einträge dieser Match-ID
+  if (!isFinalThirdsLoop) {
     await supabase.from("user_points_detail")
       .delete()
       .eq("match_id", mId)
@@ -185,8 +227,11 @@ export async function processPrognosisPoints(allMatches, currentMatch, forcedGro
   }
   
   if (pointsEntries.length > 0) {
-    const { error } = await supabase.from("user_points_detail").insert(pointsEntries);
-    if (error) console.error("Fehler beim Speichern der Prognose-Punkte:", error.message);
+    // UPSERT fängt nun über den neuen DB-Constraint jegliche team- und kategorieübergreifenden Dopplungen ab!
+    const { error } = await supabase.from("user_points_detail").upsert(pointsEntries, {
+      onConflict: "player_id,category,reference_team,is_prognosis"
+    });
+    if (error) console.error("Fehler beim Speichern/Update der Prognose-Punkte:", error.message);
   }
 }
 

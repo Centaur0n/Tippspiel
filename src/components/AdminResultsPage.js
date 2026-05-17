@@ -222,11 +222,8 @@ function AdminResultsPage({ phaseId, onUpdate }) {
         <h2 style={{ color: "#dc2626" }}>Admin: Gruppen</h2>
         {Object.keys(grouped).sort().map(name => {
           const groupMatches = grouped[name];
-          
-          // Prüfen, ob alle 6 Spiele der Gruppe ein Ergebnis haben
-          const groupFinished = groupMatches.every(m => 
-            m.goals_a_real !== null && m.goals_b_real !== null
-          );
+          const groupData = allGroupsArray.find(g => g.id === name);
+          const tableData = groupData ? groupData.teams : [];
 
           return (
             <GroupTable 
@@ -234,23 +231,18 @@ function AdminResultsPage({ phaseId, onUpdate }) {
               groupName={name} 
               matches={groupMatches} 
               tips={realResultsAsTips} 
-              tableData={allGroupsArray.find(g => g.id === name)?.teams || []} 
+              tableData={tableData} 
               onSaveTip={saveRealResult} 
               isSubmitted={false}
-              isAdmin={true} // Hier setzen wir isAdmin hart auf true, da wir auf der Admin-Page sind
+              isAdmin={true} 
               manualRanks={manualRanks}
-              
-              // KORREKTUR DER FEHLERZEILEN:
+                
+              // Vereinfacht: Da die GroupTable die Box erst anzeigt, wenn alle Spiele 
+              // eingetragen sind, können wir den Rang hier ohne Extra-Prüfung direkt wegspeichern.
               onSaveManualRank={(teamName, rank) => {
-                // Wir prüfen groupFinished (die Variable von oben)
-                // Und wir nutzen saveAdminManualRank (deine Funktion aus der Page)
-                if (groupFinished) {
-                  saveAdminManualRank(teamName, rank);
-                } else {
-                  console.warn("Manuelle Reihung erst nach allen Gruppenspielen möglich.");
-                }
+                saveAdminManualRank(teamName, rank);
               }}
-            />
+             />
           );
         })}
         <BestThirdsTable 
