@@ -140,18 +140,32 @@ function TippsPage({ player, phaseId }) {
 
     const isSpecial = typeof matchId === 'string' && matchId.startsWith('OPT');
     
+    // Prüfen, ob es sich um ein KO-Spiel handelt (entweder über die Matches-Liste oder matchId-Typ)
+    const currentMatch = matches.find(m => m.id === matchId);
+    const isKOMatch = currentMatch?.stage === "ko";
+
     if (isSpecial) {
       await supabase.from("tip_final_matrix").upsert([{
         player_id: player.id, matrix_key: matchId, goals_a: gA, goals_b: gB,
         winner: calculatedWinner, phase_id: phaseId,
       }], { onConflict: 'player_id, matrix_key' });
     } else {
-      await supabase.from("tip").upsert([{
-        player_id: player.id, match_id: matchId, phase_id: phaseId,
-        goals_a: gA, goals_b: gB, winner: calculatedWinner,
-      }], { onConflict: 'player_id, match_id, phase_id' });
+      // --- DIE NEUE WEGWEISER-LOGIK ---
+      // Wenn wir in Phase 1 sind UND es ein KO-Spiel ist -> NICHT in 'tip' speichern!
+      if (Number(phaseId) === 1 && isKOMatch) {
+        console.log(`[SAVE-SHIELD] Phase 1 KO-Match ${matchId} wird nicht in 'tip' gespeichert, da es eine reine Prognose ist.`);
+        // Wir überspringen den DB-Upsert für 'tip' komplett!
+      } else {
+        // In allen anderen Fällen (Gruppenspiele in Phase 1, oder KO-Spiele in Phase 2+) ganz normal speichern
+        await supabase.from("tip").upsert([{
+          player_id: player.id, match_id: matchId, phase_id: phaseId,
+          goals_a: gA, goals_b: gB, winner: calculatedWinner,
+        }], { onConflict: 'player_id, match_id, phase_id' });
+      }
     }
     
+    // WICHTIG: Den lokalen State setzen wir IMMER, damit die UI flüssig reagiert 
+    // und der useEffect-Debouncer die 'user_prognosis_ko' Tabelle füttern kann!
     setTips(prev => ({ ...prev, [matchId]: { goals_a: gA, goals_b: gB, winner: calculatedWinner } }));
   }
 
@@ -404,6 +418,8 @@ function TippsPage({ player, phaseId }) {
       winner_small_final: r3placeMatch ? getProgWinner(4, 1) : null,
       loser_small_final:  r3placeMatch ? getProgLoser(4, 1) : null
     };
+
+    console.log("[KO-TRACE] --- FINALES PROGNOSE-OBJEKT FÜR DB ---", finalRecord);
 
     const { error } = await supabase.from("user_prognosis_ko").upsert([finalRecord], { onConflict: 'player_id, phase_id' });
     if (error) console.error(`DB-Fehler Phase ${currentId}:`, error.message);
