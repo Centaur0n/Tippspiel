@@ -200,24 +200,13 @@ export async function syncRealTournamentState(matches, groupName = null) {
 }
 
 async function updateKOMatchLabels(matches, allTables, best8ThirdsReal, realTips) {
-
-  console.log("[DEBUG-CHECK] Anzahl Matches mit winner_real:", 
-  matches.filter(m => m.stage === "ko" && m.winner_real !== null).length);
-
-  // 1. DIAGNOSE & VORAUSSETZUNGEN (Dein originaler Code beibehalten)
   const allGroupMatches = matches.filter(m => m.stage === "group");
   const finishedGroupMatchesCount = allGroupMatches.filter(m => m.goals_a_real !== null).length;
   const allGroupGamesFinished = allGroupMatches.every(m => m.goals_a_real !== null);
 
   console.log(`[SYNC-DEBUG] Starte Kaskade. Fertige Gruppen-Spiele: ${finishedGroupMatchesCount}`);
 
-  if (finishedGroupMatchesCount > 0 && !allGroupGamesFinished) {
-    const hasActiveKOChanges = matches.some(m => m.stage === "ko" && m.goals_a_real !== null);
-    if (!hasActiveKOChanges) return matches;
-  }
   if (finishedGroupMatchesCount === 0) return matches;
-
-  console.log("=== START SYNC KO LABELS ===");
 
   const groupResults = {};
   allTables.forEach(t => {
@@ -227,83 +216,70 @@ async function updateKOMatchLabels(matches, allTables, best8ThirdsReal, realTips
   });
 
   const tournamentContext = { groups: groupResults, thirdPlaces: best8ThirdsReal, tips: realTips, phaseId: 1 };
-  const koMatches = matches
+  let localMatches = [...matches];
+  const koMatches = localMatches
     .filter(m => m.stage === "ko")
     .sort((a, b) => a.stage_order - b.stage_order || a.match_order - b.match_order);
 
-  let localMatches = [...matches];
-
-  // 2. KASKADIERUNGS-LOOP
+  // --- PHASE 1: KASKADE IM SPEICHER VOLLSTÄNDIG AUFLÖSEN ---
   for (const m of koMatches) {
     let newTeamA = m.team_a;
     let newTeamB = m.team_b;
 
-    console.log(`[LOOP-DEBUG] Prüfe Match ${m.match_order} (ID: ${m.id}). Aktuelle Teams: ${m.team_a} vs ${m.team_b}`);
-
     if (m.stage_order === 1) {
-      // 16tel-Finale auflösen (benötigt Gruppen-Daten)
       if (isPlaceholder(m.team_a)) newTeamA = resolveSlot(m.placeholder_a, { ...tournamentContext, matches: localMatches }) || m.placeholder_a;
       if (isPlaceholder(m.team_b)) newTeamB = resolveSlot(m.placeholder_b, { ...tournamentContext, matches: localMatches }) || m.placeholder_b;
     } else {
-      // Folgerunden: Gewinner aus lokalem Array ziehen
-      async function getTeamFromPreviousStage(placeholder) {
+      const getTeamFromPreviousStage = (placeholder) => {
         if (!placeholder) return null;
         const matchInfo = placeholder.match(/^([A-Z]+)(\d+)$/i);
         if (!matchInfo) return null;
-        
-        // Offset-Berechnung: Ist diese korrekt?
+
+        // Offset-Mapping basierend auf deinen Kürzellogiken
         const offset = (matchInfo[1] === "SSZF" ? 72 : matchInfo[1] === "SAF" ? 88 : matchInfo[1] === "SVF" ? 96 : 100);
         const targetOrder = parseInt(matchInfo[2], 10) + offset;
         
-        // HIER LOGGEN WIR DIE SUCHE
-        console.log(`[DEBUG] Suche Quell-Match für ${placeholder} -> Match-Order gesucht: ${targetOrder}`);
+        const sourceMatch = localMatches.find(x => parseInt(x.match_order) === targetOrder);
         
-        console.log(`[DEBUG-KASKADE] Suche Quelle für ${placeholder}.`);
-
-        const sourceMatch = localMatches.find(x => x.match_order === targetOrder);
-        console.log(`[DEBUG-KONTROLLE] Suche Order ${targetOrder}. Gefundenes Match:`, sourceMatch ? `ID: ${sourceMatch.id}, Winner: ${sourceMatch.winner_real}` : "NIX");
-
-        console.log(`[DEBUG-VIERTEL] Suche ${placeholder}. Ziel-Order: ${targetOrder}. Gefunden?`, 
-        sourceMatch ? `JA! Winner: ${sourceMatch.winner_real}` : "NEIN!");
-        
-        if (sourceMatch) {
-          console.log(`[DEBUG-MATCH-STATUS] ID ${sourceMatch.id} | Tore: ${sourceMatch.goals_a_real}:${sourceMatch.goals_b_real} | Winner_Real: ${sourceMatch.winner_real}`);
-        } else {
-          console.log(`[DEBUG-MATCH-STATUS] Match mit Order ${targetOrder} NICHT gefunden.`);
+        if (sourceMatch && sourceMatch.winner_real) {
+          const winner = (sourceMatch.winner_real === 1) ? sourceMatch.team_a : sourceMatch.team_b;
+          const loser = (sourceMatch.winner_real === 1) ? sourceMatch.team_b : sourceMatch.team_a;
+          
+          // SHF = Sieger Halbfinale -> Finale
+          // VHF = Verlierer Halbfinale -> Platz 3
+          return (matchInfo[1] === "SHF") ? winner : (matchInfo[1] === "VHF") ? loser : winner;
         }
+        return null;
+      };
 
-        if (!sourceMatch?.winner_real) return null;
-        return (sourceMatch.winner_real === 1) ? sourceMatch.team_a : sourceMatch.team_b;
-      }
-      if (isPlaceholder(m.team_a)) newTeamA = await getTeamFromPreviousStage(m.placeholder_a) || m.placeholder_a;
-      if (isPlaceholder(m.team_b)) newTeamB = await getTeamFromPreviousStage(m.placeholder_b) || m.placeholder_b;
+      if (isPlaceholder(m.team_a)) newTeamA = getTeamFromPreviousStage(m.placeholder_a) || m.placeholder_a;
+      if (isPlaceholder(m.team_b)) newTeamB = getTeamFromPreviousStage(m.placeholder_b) || m.placeholder_b;
     }
 
-    // 3. DATENSCHONENDES UPDATE
-    const isCurrentlyPlaceholder = isPlaceholder(m.team_a) || isPlaceholder(m.team_b);
-    
-    if (newTeamA !== m.team_a || newTeamB !== m.team_b || isCurrentlyPlaceholder) {
-      console.log(`[PUSH] Update ID ${m.id}: Ersetze Platzhalter/Aktualisiere -> ${newTeamA} vs ${newTeamB}`);
-      
-      const { error } = await supabase
-        .from("match")
-        .update({ team_a: newTeamA, team_b: newTeamB })
-        .eq("id", m.id);
+    const idx = localMatches.findIndex(lm => lm.id === m.id);
+    localMatches[idx] = { ...localMatches[idx], team_a: newTeamA, team_b: newTeamB };
+  }
 
-      if (error) console.error(`[DB-ERROR]`, error);
-      else console.log(`[DB-SUCCESS] Update für ID ${m.id} bestätigt.`);
-
-      // Lokal updaten für die nächste Stufe der Kaskade
-      localMatches = localMatches.map(lm => lm.id === m.id ? { ...lm, team_a: newTeamA, team_b: newTeamB } : lm);
+  // --- PHASE 2: PUSH ZUR DATENBANK ---
+  for (const m of localMatches.filter(m => m.stage === "ko")) {
+    const originalMatch = matches.find(orig => orig.id === m.id);
+    if (m.team_a !== originalMatch.team_a || m.team_b !== originalMatch.team_b) {
+      await supabase.from("match").update({ team_a: m.team_a, team_b: m.team_b }).eq("id", m.id);
     }
   }
-  console.log("=== END SYNC KO LABELS ===");
+
   return localMatches; 
 }
 
 export function isPlaceholder(str) {
   if (!str) return false;
+  // Prüft auf explizite "Placeholder" Zeichenfolge
   if (str.includes("Placeholder")) return true;
-  const placeholderRegex = /^([A-L][1-4]|[1-4][A-L]|Winner|Loser|1[A-L]|2[A-L]|3[A-L]|SSZF?\d+)/i;
-  return placeholderRegex.test(str);
+  
+  // Aggressiver Regex: Alles, was mit SSZF, SAF, SVF, VHF beginnt und eine Zahl hat
+  // ODER die alten Platzhalterformate wie A1, 1A etc.
+  const placeholderRegex = /^(SSZF|SAF|SVF|VHF|SHF|Winner|Loser|[A-L][1-4]|[1-4][A-L])\d*$/i;
+  
+  const isMatch = placeholderRegex.test(str);
+  return isMatch;
 }
