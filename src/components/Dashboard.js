@@ -8,7 +8,8 @@ import { DASHBOARD_STYLES, getTabButtonStyle, getPhaseButtonStyle } from "../Uti
 import TippsPage from "./TippsPage";
 import AdminResultsPage from "./AdminResultsPage"; 
 import AdminControlCenter from "./AdminControlCenter";
-import PointsAnalysisPage from "./PointsAnalysisPage"; // Import ist korrekt drin
+import PointsAnalysisPage from "./PointsAnalysisPage";
+import BonusQuestions from "./BonusQuestions";
 
 const Dashboard = ({ player, onLogout }) => {
   const [activePhase, setActivePhase] = useState("ranking");
@@ -17,6 +18,7 @@ const Dashboard = ({ player, onLogout }) => {
   const [ranking, setRanking] = useState([]);
   const [allPhases, setAllPhases] = useState([]); 
   const [loading, setLoading] = useState(true);
+  const [isPhase1Locked, setIsPhase1Locked] = useState(false);
 
   // Initialer Datencheck beim Laden der Komponente
   useEffect(() => {
@@ -40,9 +42,15 @@ const Dashboard = ({ player, onLogout }) => {
         supabase.from("player").select("id, name, display_name")
       ]);
 
-      setAllPhases(phasesRes.data || []);
+      // FIX: Wir speichern die Rohdaten in einer lokalen Variable...
+      const phasesData = phasesRes.data || [];
+      setAllPhases(phasesData);
       setSystemConfig(configRes.data);
       setNextMatches(matchesRes.data || []);
+
+      // ...und suchen direkt in dieser Variable, damit es sofort verfügbar ist!
+      const phase1 = phasesData.find(p => Number(p.id) === 1);
+      setIsPhase1Locked(phase1 ? (phase1.is_submitted || configRes.data?.tips_locked_global) : false);
 
       const players = playersRes.data || [];
       const allPoints = pointsRes.data || [];
@@ -93,6 +101,14 @@ const Dashboard = ({ player, onLogout }) => {
               Phase {p.id} {p.is_submitted && " 🔒"} 
             </button>
           ))}
+
+          {/* 🌟 NEUER REITER FÜR BONUSFRAGEN */}
+          <button 
+            onClick={() => setActivePhase("bonus_questions")} 
+            style={getPhaseButtonStyle(activePhase === "bonus_questions", systemConfig?.current_phase_id === 1)}
+          >
+            🏆 Bonusfragen {isPhase1Locked ? " 🔒" : ""}
+          </button>
 
           {player.is_admin && (
             <>
@@ -166,7 +182,6 @@ const Dashboard = ({ player, onLogout }) => {
           </>
         ) : (
           <div style={DASHBOARD_STYLES.flexibleCard}>
-            {/* HIER SIND DIE ÄNDERUNGEN: */}
             {activePhase === "admin_control" ? (
               <AdminControlCenter onUpdate={fetchDashboardData} />
             ) : activePhase === "admin_results" ? (
@@ -176,6 +191,8 @@ const Dashboard = ({ player, onLogout }) => {
               />
             ) : activePhase === "points_analysis" ? (
               <PointsAnalysisPage userId={player.id} />
+            ) : activePhase === "bonus_questions" ? (
+              <BonusQuestions userId={player.id} isReadOnly={isPhase1Locked} />
             ) : (
               <TippsPage player={player} phaseId={activePhase} isAdmin={player.is_admin} />
             )}

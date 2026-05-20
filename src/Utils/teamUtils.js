@@ -26,6 +26,13 @@ export const getCountryCode = (teamName) => {
   return countryMapping[teamName] || null;
 };
 
+export const ALL_TEAMS = Object.keys(countryMapping).sort();
+export const POT_4_TEAMS = [
+  "Jordanien", "Kap Verde", "Ghana", "Curaçao", "Haiti", 
+  "Neuseeland", "Bosnien", "Kongo", "Irak", 
+  "Schweden", "Tschechien", "Türkei"
+].sort();
+
 /**
  * React-Komponente: Zeigt die Flagge eines Teams an.
  * @param {string} teamName - Der Name des Teams (muss im countryMapping existieren).
