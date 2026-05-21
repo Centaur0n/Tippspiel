@@ -126,7 +126,7 @@ const tdStyle = { padding: "12px", borderBottom: "1px solid #1f2937" };
 const trStyle = { borderBottom: "1px solid #374151", transition: "background-color 0.2s" };
 
 const phaseBadge = (phase) => ({
-  backgroundColor: phase === 1 ? "#065f46" : "#1e40af",
+  backgroundColor: phase === 1 ? "#065f46" : phase === 2 ? "#1e40af" : phase === 3 ? "#9125cf" : phase === 4 ? "#cc3a42" : "#dae720",
   padding: "4px 10px",
   borderRadius: "12px",
   fontSize: "0.75em",

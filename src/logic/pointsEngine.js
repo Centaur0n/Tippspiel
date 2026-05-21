@@ -27,7 +27,7 @@ export const POINTS_CONFIG = {
   PROG_TABLE_POS: 2.5,
 
   DIVISORS: {
-    1: 1, 2: 1, 3: 2, 4: 4, 5: 8
+    1: 1, 2: 1, 3: 1.5, 4: 2.5, 5: 8
   }
 };
 
@@ -75,7 +75,7 @@ export const getDynamicWinnerPoints = (rankA, rankB) => {
   return 4; 
 };
 
-export async function processPrognosisPoints(allMatches, currentMatch, forcedGroupName = null, isFinalThirdsLoop = false) {
+export async function processPrognosisPoints(allMatches, currentMatch, forcedGroupName = null) {
   if (currentMatch.goals_a_real === null || currentMatch.goals_b_real === null) {
     return;
   }
@@ -93,8 +93,11 @@ export async function processPrognosisPoints(allMatches, currentMatch, forcedGro
       .eq("group_name", activeGroupName || "")
       .maybeSingle();
 
-    if (groupErr)
-    realGroup = groupData;
+    if (groupErr) {
+      console.error("[POINTS] Fehler bei real_group_state:", groupErr.message);
+    } else {
+      realGroup = groupData;
+    }
   }
 
   if (stage === "ko") {
@@ -103,16 +106,16 @@ export async function processPrognosisPoints(allMatches, currentMatch, forcedGro
       .select("*")
       .eq("id", 1)
       .single();
-    if (koErr) 
-    realKO = koData;
+
+    if (koErr) {
+      console.error("[POINTS] Fehler bei real_ko_state:", koErr.message);
+    } else {
+      realKO = koData;
+    }
   }
 
-  if (stage === "group" && !realGroup) {
-    return;
-  }
-  if (stage === "ko" && !realKO) {
-    return;
-  }
+  if (stage === "group" && !realGroup) return;
+  if (stage === "ko" && !realKO) return;
 
   const pointsEntries = [];
 
@@ -121,16 +124,12 @@ export async function processPrognosisPoints(allMatches, currentMatch, forcedGro
     const groupMatches = allMatches.filter(m => m.group_name === activeGroupName);
     const allMatchesPlayed = groupMatches.every(m => m.goals_a_real !== null && m.goals_b_real !== null);
     const isGroupReallyFinished = realGroup.is_finished || allMatchesPlayed;
-
-     
-    if (!isGroupReallyFinished) {
-      return; 
-    }
-
+         
     if (isGroupReallyFinished) {
       const lastMatchOfThisGroup = groupMatches.reduce((max, m) => m.match_order > max.match_order ? m : max, groupMatches[0]);
 
-      if (mId === lastMatchOfThisGroup?.id || isFinalThirdsLoop) {
+      // 1. Normale Tabellenplätze & Direkt-Qualifikanten berechnen
+      if (mId === lastMatchOfThisGroup?.id) {
         const { data: userGroupProgs, error: uProgErr } = await supabase
           .from("user_prognosis_group")
           .select("*")
@@ -139,75 +138,85 @@ export async function processPrognosisPoints(allMatches, currentMatch, forcedGro
         if (uProgErr) console.error("[PROG-DIAG] Fehler beim Laden von user_prognosis_group:", uProgErr.message);
 
         if (userGroupProgs) {
-          // NEUER FILTER: Nur valide/vollständige Prognosen
           const validProgs = userGroupProgs.filter(p => p.rank_1 && p.rank_2 && p.rank_3 && p.rank_4);
 
           validProgs.forEach(prog => {
-            if (!isFinalThirdsLoop) {
-              
-              ['rank_1', 'rank_2', 'rank_3', 'rank_4'].forEach((rankKey) => {
-                if (prog[rankKey] === realGroup[rankKey] && realGroup[rankKey] !== null) {
-                  pointsEntries.push(createPointEntry(prog.player_id, 'GROUP_RANK', POINTS_CONFIG.PROG_TABLE_POS, prog[rankKey], 1, activeGroupName, mId, mOrder));
-                }
-              });
-
-              const userQualifiers = [...(prog.reached_ko || [])];
-              const realQualifiers = [...(realGroup.reached_ko || [])];
-
-              userQualifiers.forEach(team => {
-                if (team && realQualifiers.includes(team)) {
-                  pointsEntries.push(createPointEntry(prog.player_id, 'PROGNOSIS_PATH', POINTS_CONFIG.PROG_REACH_16, team, 1, activeGroupName, mId, mOrder, { original: POINTS_CONFIG.PROG_REACH_16 }));
-                }
-              });
-
-              const userDroppedOut = [...(prog.dropped_out || [])];
-              if (realGroup.rank_4 && userDroppedOut.includes(realGroup.rank_4)) {
-                pointsEntries.push(createPointEntry(prog.player_id, 'PROGNOSIS_PATH', POINTS_CONFIG.PROG_OUT_VORRUNDE, realGroup.rank_4, 1, activeGroupName, mId, mOrder, { original: POINTS_CONFIG.PROG_OUT_VORRUNDE }));
+            ['rank_1', 'rank_2', 'rank_3', 'rank_4'].forEach((rankKey) => {
+              if (prog[rankKey] === realGroup[rankKey] && realGroup[rankKey] !== null) {
+                pointsEntries.push(createPointEntry(prog.player_id, 'GROUP_RANK', POINTS_CONFIG.PROG_TABLE_POS, prog[rankKey], 1, activeGroupName, mId, mOrder));
               }
-            }
+            });
 
-            if (isFinalThirdsLoop) {
-              const groupThirdTeam = realGroup.rank_3;
+            const userQualifiers = [...(prog.reached_ko || [])];
+            const realQualifiers = [...(realGroup.reached_ko || [])];
 
-              if (groupThirdTeam) {
-                const realThirdsReachedKO = realGroup.reached_ko_best_thirds || [];
-                if (realThirdsReachedKO.includes(groupThirdTeam)) {
-                  const userExpectedQualifiers = [...(prog.reached_ko || []), ...(prog.reached_ko_best_thirds || [])];
-                  if (userExpectedQualifiers.includes(groupThirdTeam)) {
-                    pointsEntries.push(createPointEntry(prog.player_id, 'PROGNOSIS_PATH', POINTS_CONFIG.PROG_REACH_16, groupThirdTeam, 1, activeGroupName, mId, mOrder, { original: POINTS_CONFIG.PROG_REACH_16 }));
-                  }
-                }
-
-                const realDroppedOut = realGroup.dropped_out || [];
-                if (realDroppedOut.includes(groupThirdTeam) && groupThirdTeam !== realGroup.rank_4) {
-                  if (prog.dropped_out?.includes(groupThirdTeam)) {
-                    pointsEntries.push(createPointEntry(prog.player_id, 'PROGNOSIS_PATH', POINTS_CONFIG.PROG_OUT_VORRUNDE, groupThirdTeam, 1, activeGroupName, mId, mOrder, { original: POINTS_CONFIG.PROG_OUT_VORRUNDE }));
-                  }
-                }
+            userQualifiers.forEach(team => {
+              if (team && realQualifiers.includes(team)) {
+                pointsEntries.push(createPointEntry(prog.player_id, 'PROGNOSIS_PATH', POINTS_CONFIG.PROG_REACH_16, team, 1, activeGroupName, mId, mOrder, { original: POINTS_CONFIG.PROG_REACH_16 }));
               }
+            });
+
+            const userDroppedOut = [...(prog.dropped_out || [])];
+            if (realGroup.rank_4 && userDroppedOut.includes(realGroup.rank_4)) {
+              pointsEntries.push(createPointEntry(prog.player_id, 'PROGNOSIS_PATH', POINTS_CONFIG.PROG_OUT_VORRUNDE, realGroup.rank_4, 1, activeGroupName, mId, mOrder, { original: POINTS_CONFIG.PROG_OUT_VORRUNDE }));
             }
           });
         }
+      }
+    }
+
+    // 2. SPEZIAL-TRIGGER FÜR SPIEL 72: Die besten Gruppendritten ALLER Gruppen auswerten
+    if (mOrder === 72) {
+      const { data: allRealGroups, error: allGroupsErr } = await supabase.from("real_group_state").select("*");
+      const { data: allUserProgs, error: allUserProgsErr } = await supabase.from("user_prognosis_group").select("*");
+
+      if (!allGroupsErr && !allUserProgsErr && allRealGroups && allUserProgs) {
+        allRealGroups.forEach(rg => {
+          const groupThirdTeam = rg.rank_3;
+          if (!groupThirdTeam) return;
+
+          const realThirdsReachedKO = rg.reached_ko_best_thirds || [];
+          const realDroppedOut = rg.dropped_out || [];
+          const relevantProgs = allUserProgs.filter(p => p.group_name === rg.group_name);
+
+          relevantProgs.forEach(prog => {
+            // A) Gruppendritter kommt weiter
+            if (realThirdsReachedKO.includes(groupThirdTeam)) {
+              const userExpectedQualifiers = [...(prog.reached_ko || []), ...(prog.reached_ko_best_thirds || [])];
+              if (userExpectedQualifiers.includes(groupThirdTeam)) {
+                pointsEntries.push(createPointEntry(prog.player_id, 'PROGNOSIS_PATH', POINTS_CONFIG.PROG_REACH_16, groupThirdTeam, 1, rg.group_name, mId, mOrder, { original: POINTS_CONFIG.PROG_REACH_16 }));
+              }
+            }
+            // B) Gruppendritter scheidet aus
+            if (realDroppedOut.includes(groupThirdTeam) && groupThirdTeam !== rg.rank_4) {
+              if (prog.dropped_out?.includes(groupThirdTeam)) {
+                pointsEntries.push(createPointEntry(prog.player_id, 'PROGNOSIS_PATH', POINTS_CONFIG.PROG_OUT_VORRUNDE, groupThirdTeam, 1, rg.group_name, mId, mOrder, { original: POINTS_CONFIG.PROG_OUT_VORRUNDE }));
+              }
+            }
+          });
+        });
       }
     }
   }
 
   // --- B. KO-PHASEN PUNKTE ---
   if (stage === "ko" && currentMatch.winner_real !== 0 && realKO) {
-    
     const { data: userKOProgs, error: koProgErr } = await supabase.from("user_prognosis_ko").select("*");
-    if (koProgErr) 
+    
+    if (koProgErr) {
+      console.error("[PROG-DIAG] Fehler beim Laden von user_prognosis_ko:", koProgErr.message);
+      return;
+    }
 
     if (userKOProgs) {
+      const validKOProgs = userKOProgs.filter(p => p.reached_16 || p.reached_8 || p.reached_4 || p.reached_2 || p.winner_final);
       
-      // NEUER FILTER: Nur Prognosen verarbeiten, die nicht völlig leer sind
-      const validKOProgs = userKOProgs.filter(p => p.reached_16 || p.reached_8 || p.reached_4 || p.reached_2);
-      
+      // FIX: progKey korrigiert auf die Zielrunde, die der Gewinner ERREICHT
       const roundMapping = {
-        1: { name: "Achtelfinale", progKey: 'reached_16', pts: POINTS_CONFIG.PROG_REACH_16, dropKey: 'drop_out_16', dropPts: POINTS_CONFIG.PROG_OUT_16 },
-        2: { name: "Viertelfinale", progKey: 'reached_8', pts: POINTS_CONFIG.PROG_REACH_8, dropKey: 'drop_out_8', dropPts: POINTS_CONFIG.PROG_OUT_8 },
-        3: { name: "Halbfinale", progKey: 'reached_4', pts: POINTS_CONFIG.PROG_REACH_4, dropKey: 'drop_out_4', dropPts: POINTS_CONFIG.PROG_OUT_4 },
-        4: { name: "Finale Einzug", progKey: 'reached_2', pts: POINTS_CONFIG.PROG_REACH_FINAL, dropKey: 'drop_out_2', dropPts: POINTS_CONFIG.PROG_OUT_2 },
+        1: { name: "Sechzehntelfinale", progKey: 'reached_8', pts: POINTS_CONFIG.PROG_REACH_8, dropKey: 'drop_out_16', dropPts: POINTS_CONFIG.PROG_OUT_16 },
+        2: { name: "Achtelfinale", progKey: 'reached_4', pts: POINTS_CONFIG.PROG_REACH_4, dropKey: 'drop_out_8', dropPts: POINTS_CONFIG.PROG_OUT_8 },
+        3: { name: "Viertelfinale", progKey: 'reached_2', pts: POINTS_CONFIG.PROG_REACH_2, dropKey: 'drop_out_4', dropPts: POINTS_CONFIG.PROG_OUT_4 },
+        4: { name: "Halbfinale", isSemifinal: true, pts: POINTS_CONFIG.PROG_REACH_FINAL, dropKey: 'drop_out_2', dropPts: POINTS_CONFIG.PROG_OUT_2 }, 
         5: { name: "Finale / Platz 3", isFinalsRound: true }
       };
 
@@ -218,22 +227,31 @@ export async function processPrognosisPoints(allMatches, currentMatch, forcedGro
 
         validKOProgs.forEach(prog => {
           const divisor = POINTS_CONFIG.DIVISORS[prog.phase_id] || 1;
+          
           if (!activeRound.isFinalsRound) {
-            const progTeams = Array.isArray(prog[activeRound.progKey]) ? prog[activeRound.progKey] : [prog[activeRound.progKey]];
-            progTeams.forEach(team => {
-              if (team && team === realWinnerOfThisMatch) {
-                pointsEntries.push(createPointEntry(prog.player_id, 'PROGNOSIS_PATH', activeRound.pts / divisor, team, prog.phase_id, "KO", mId, mOrder, { original: activeRound.pts, divisor }));
-              }
-            });
+            // GEWINNER-CHECK
+            let isWinnerPredicted = false;
+            if (activeRound.isSemifinal) {
+              // Halbfinale-Gewinner zieht ins Finale ein (muss unter winner_final oder loser_final getippt sein)
+              isWinnerPredicted = (prog.winner_final === realWinnerOfThisMatch || prog.loser_final === realWinnerOfThisMatch);
+            } else {
+              const progTeams = Array.isArray(prog[activeRound.progKey]) ? prog[activeRound.progKey] : [prog[activeRound.progKey]];
+              isWinnerPredicted = progTeams.includes(realWinnerOfThisMatch);
+            }
+
+            if (isWinnerPredicted) {
+              pointsEntries.push(createPointEntry(prog.player_id, 'PROGNOSIS_PATH', activeRound.pts / divisor, realWinnerOfThisMatch, prog.phase_id, "KO", mId, mOrder, { original: activeRound.pts, divisor, roundName: activeRound.name, isWinner: true }));
+            }
+            
+            // VERLIERER-CHECK (Ausscheiden)
             if (activeRound.dropKey) {
-              const progDropped = prog[activeRound.dropKey] || [];
-              progDropped.forEach(team => {
-                if (team && team === realLoserOfThisMatch) {
-                  pointsEntries.push(createPointEntry(prog.player_id, 'PROGNOSIS_PATH', activeRound.dropPts / divisor, team, prog.phase_id, "KO", mId, mOrder, { original: activeRound.dropPts, divisor }));
-                }
-              });
+              const progDropped = Array.isArray(prog[activeRound.dropKey]) ? prog[activeRound.dropKey] : [prog[activeRound.dropKey]];
+              if (progDropped.includes(realLoserOfThisMatch)) {
+                pointsEntries.push(createPointEntry(prog.player_id, 'PROGNOSIS_PATH', activeRound.dropPts / divisor, realLoserOfThisMatch, prog.phase_id, "KO", mId, mOrder, { original: activeRound.dropPts, divisor, roundName: activeRound.name, isWinner: false }));
+              }
             }
           } else {
+            // FINALE & PLATZ 3 (Unverändert korrekt)
             const isChampMatch = (mOrder === 79 || currentMatch.ko_order === 0);
             if (isChampMatch) {
               if (prog.winner_final && realKO.winner_final === prog.winner_final && prog.winner_final === realWinnerOfThisMatch) {
@@ -257,31 +275,29 @@ export async function processPrognosisPoints(allMatches, currentMatch, forcedGro
   }
 
   // --- C. SPEICHERN & CLEANUP ---
-  
   const uniquePointsMap = {};
-  const affectedCleanups = new Set();
   pointsEntries.forEach(entry => {
-    const uniqueKey = `${entry.player_id}_${entry.category}_${entry.reference_team}_${entry.phase_id}_${entry.is_prognosis}`;
+    const uniqueKey = `${entry.player_id}_${entry.category}_${entry.reference_team}_${entry.phase_id}`;
     uniquePointsMap[uniqueKey] = entry;
-    affectedCleanups.add(`${entry.group_name}_${entry.phase_id}`);
   });
 
   const finalPointsEntries = Object.values(uniquePointsMap);
   
-  if (affectedCleanups.size > 0) {
-    for (const cleanupKey of affectedCleanups) {
-      const [gName, pId] = cleanupKey.split("_");
-      await supabase.from("user_points_detail").delete().eq("match_id", mId).eq("group_name", gName).eq("phase_id", Number(pId)).eq("is_prognosis", true);
-    }
-  } else {
-    await supabase.from("user_points_detail").delete().eq("match_id", mId).eq("group_name", activeGroupName || "KO").eq("is_prognosis", true);
-  }
+  await supabase
+    .from("user_points_detail")
+    .delete()
+    .eq("match_id", mId)
+    .eq("is_prognosis", true);
   
   if (finalPointsEntries.length > 0) {
-    const { error } = await supabase.from("user_points_detail").upsert(finalPointsEntries, { onConflict: "player_id,category,reference_team,phase_id,is_prognosis" });
-    if (error) console.error("[PROG-DIAG] ERROR:", error.message);
-    else console.log("[PROG-DIAG] ===== Upsert erfolgreich! =====");
-  } else {
+    const { error } = await supabase
+      .from("user_points_detail")
+      .upsert(finalPointsEntries, { 
+        onConflict: "player_id,match_id,category,reference_team,phase_id" 
+      });
+
+    if (error) console.error("[PROG-DIAG] Upsert-Fehler:", error.message);
+    else console.log(`[PROG-DIAG] ===== ${finalPointsEntries.length} Prognosen erfolgreich aktualisiert! =====`);
   }
 }
 

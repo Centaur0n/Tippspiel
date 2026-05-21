@@ -112,6 +112,7 @@ function AdminResultsPage({ phaseId, onUpdate }) {
     const currentMatchBefore = matches.find(m => m.id === matchId);
     if (currentMatchBefore?.stage === "group") await resetManualRanksForGroup(currentMatchBefore.group_name);
 
+    // 1. Ergebnis im Spiel speichern
     await supabase.from("match").update({ goals_a_real: gA, goals_b_real: gB, winner_real: finalWinner }).eq("id", matchId);
     
     const { data: allMatches } = await supabase.from("match").select("*").order("match_order");
@@ -120,17 +121,43 @@ function AdminResultsPage({ phaseId, onUpdate }) {
     const { data: refreshedMatches } = await supabase.from("match").select("*").order("match_order");
     const dynamicCurrentMatch = refreshedMatches.find(m => m.id === matchId);
 
+    // 2. Bestimme die richtige Phase für die Punkte-Gutschrift
+    // KO-Spiele gehören fix zu Phase 2, Gruppenspiele zur aktuellen phaseId
+    const targetPhase = dynamicCurrentMatch?.stage === "ko" ? 2 : phaseId;
+
+    // Alte Match-Punkte für dieses Spiel löschen
     await supabase.from("user_points_detail").delete().eq("match_id", matchId).eq("is_prognosis", false);
 
-    if (!isReset) {
+    if (!isReset && dynamicCurrentMatch) {
       const winnerPoints = await fetchWinnerPoints(dynamicCurrentMatch.team_a, dynamicCurrentMatch.team_b);
       const { data: allTips } = await supabase.from("tip").select("*").eq("match_id", matchId);
+      
       if (allTips?.length > 0) {
-        const pointsToInsert = allTips.map(t => {
-          const result = calculateDetailedMatchPoints({ goals_a: t.goals_a, goals_b: t.goals_b, winner: t.winner }, { goals_a: gA, goals_b: gB, winner: finalWinner }, winnerPoints);
-          return { player_id: t.player_id, match_id: matchId, match_order: dynamicCurrentMatch.match_order, phase_id: phaseId, group_name: dynamicCurrentMatch.group_name || "KO", points_total: result.total, breakdown: result.breakdown, category: 'MATCH', is_prognosis: false };
+        // FILTER: Nur Tipps verarbeiten, die der targetPhase entsprechen (beseitigt die Fake-Tipps aus Phase 1)
+        const validTips = allTips.filter(t => Number(t.phase_id) === targetPhase || !t.phase_id);
+
+        const pointsToInsert = validTips.map(t => {
+          const result = calculateDetailedMatchPoints(
+            { goals_a: t.goals_a, goals_b: t.goals_b, winner: t.winner }, 
+            { goals_a: gA, goals_b: gB, winner: finalWinner }, 
+            winnerPoints
+          );
+          return { 
+            player_id: t.player_id, 
+            match_id: matchId, 
+            match_order: dynamicCurrentMatch.match_order, 
+            phase_id: targetPhase, // Hier korrekt zuordnen!
+            group_name: dynamicCurrentMatch.group_name || "KO", 
+            points_total: result.total, 
+            breakdown: result.breakdown, 
+            category: 'MATCH', 
+            is_prognosis: false 
+          };
         });
-        await supabase.from("user_points_detail").insert(pointsToInsert);
+
+        if (pointsToInsert.length > 0) {
+          await supabase.from("user_points_detail").insert(pointsToInsert);
+        }
       }
     }
 
