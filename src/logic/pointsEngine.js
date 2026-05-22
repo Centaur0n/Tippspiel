@@ -27,10 +27,11 @@ export const POINTS_CONFIG = {
   PROG_TABLE_POS: 2.5,
 
   DIVISORS: {
-    1: 1, 2: 1, 3: 1.5, 4: 2.5, 5: 8
+    1: 1, 2: 1, 3: 1, 4: 1, 5: 1
   }
 };
 
+// --- HELPER: BERECHNET DIE PUNKTE FÜR EINEN EINZELNEN TIPP ---
 export const calculateDetailedMatchPoints = (tip, actual, winnerPoints) => {
   const points = { winner: 0, diff: 0, goals_a: 0, goals_b: 0, sum: 0, exact_bonus: 0 };
   if (!tip || actual.goals_a === null || actual.goals_a === undefined) return { total: 0, breakdown: {} };
@@ -68,6 +69,7 @@ export const calculateDetailedMatchPoints = (tip, actual, winnerPoints) => {
   };
 };
 
+// --- HELPER: DYNAMISCHE TENDENZ-PUNKTE ---
 export const getDynamicWinnerPoints = (rankA, rankB) => {
   const diff = rankA - rankB; 
   if (diff < -20) return 3; 
@@ -75,6 +77,84 @@ export const getDynamicWinnerPoints = (rankA, rankB) => {
   return 4; 
 };
 
+// ==========================================
+// NEU: HIER IST DIE FUNKTION FÜR DIE MATCH-TIPPS
+// ==========================================
+export async function processStandardMatchTips(currentMatch, phaseId) {
+  if (currentMatch.goals_a_real === null || currentMatch.goals_b_real === null) return;
+
+  const mId = currentMatch.id;
+
+  // 1. Alle Tipps für dieses Match UND die aktive Phase laden
+  const { data: tips, error: tipsErr } = await supabase
+    .from("tip")
+    .select("*")
+    .eq("match_id", mId)
+    .eq("phase_id", phaseId);
+
+  if (tipsErr || !tips || tips.length === 0) return;
+
+  // 2. Basis-Punkte ermitteln (Unterstützt deine dynamische FIFA-Rang-Logik)
+  let winnerPoints = 4; // Standardwert für KO
+  if (currentMatch.stage === "group") {
+    const { data: teams } = await supabase
+      .from('teams')
+      .select('name, fifa_rank')
+      .in('name', [currentMatch.team_a, currentMatch.team_b]);
+
+    const rankA = teams?.find(t => t.name === currentMatch.team_a)?.fifa_rank || 50;
+    const rankB = teams?.find(t => t.name === currentMatch.team_b)?.fifa_rank || 50;
+    winnerPoints = getDynamicWinnerPoints(rankA, rankB);
+  }
+
+  const pointsEntries = [];
+
+  // 3. Jeden Tipp berechnen
+  tips.forEach(tip => {
+    const actualResults = {
+      goals_a: currentMatch.goals_a_real,
+      goals_b: currentMatch.goals_b_real
+    };
+
+    const { total, breakdown } = calculateDetailedMatchPoints(
+      { goals_a: tip.goals_a, goals_b: tip.goals_b, winner: tip.winner },
+      actualResults,
+      winnerPoints
+    );
+
+    pointsEntries.push({
+      player_id: tip.player_id,
+      match_id: mId,
+      match_order: currentMatch.match_order,
+      category: "MATCH", // Exakt synchronisiert mit deiner alten DB-Struktur
+      points_total: total,
+      phase_id: phaseId,
+      group_name: currentMatch.group_name || "KO",
+      is_prognosis: false, 
+      reference_team: "",  
+      breakdown: {
+        ...breakdown,
+        info: `Spiel-Tipp: ${currentMatch.team_a} vs. ${currentMatch.team_b}`
+      }
+    });
+  });
+
+  // 4. Cleanup alter Einträge
+  await supabase
+    .from("user_points_detail")
+    .delete()
+    .eq("match_id", mId)
+    .eq("phase_id", phaseId)
+    .eq("is_prognosis", false);
+
+  // 5. Per Upsert (oder Insert) speichern
+  if (pointsEntries.length > 0) {
+    await supabase.from("user_points_detail").insert(pointsEntries);
+    console.log(`[ENGINE] ===== ${pointsEntries.length} Match-Tipps erfolgreich aktualisiert! =====`);
+  }
+}
+
+// --- BERECHNUNG DER TURNIER-PFADE / PROGNOSEN ---
 export async function processPrognosisPoints(allMatches, currentMatch, forcedGroupName = null) {
   if (currentMatch.goals_a_real === null || currentMatch.goals_b_real === null) {
     return;
@@ -128,7 +208,6 @@ export async function processPrognosisPoints(allMatches, currentMatch, forcedGro
     if (isGroupReallyFinished) {
       const lastMatchOfThisGroup = groupMatches.reduce((max, m) => m.match_order > max.match_order ? m : max, groupMatches[0]);
 
-      // 1. Normale Tabellenplätze & Direkt-Qualifikanten berechnen
       if (mId === lastMatchOfThisGroup?.id) {
         const { data: userGroupProgs, error: uProgErr } = await supabase
           .from("user_prognosis_group")
@@ -165,7 +244,6 @@ export async function processPrognosisPoints(allMatches, currentMatch, forcedGro
       }
     }
 
-    // 2. SPEZIAL-TRIGGER FÜR SPIEL 72: Die besten Gruppendritten ALLER Gruppen auswerten
     if (mOrder === 72) {
       const { data: allRealGroups, error: allGroupsErr } = await supabase.from("real_group_state").select("*");
       const { data: allUserProgs, error: allUserProgsErr } = await supabase.from("user_prognosis_group").select("*");
@@ -180,14 +258,12 @@ export async function processPrognosisPoints(allMatches, currentMatch, forcedGro
           const relevantProgs = allUserProgs.filter(p => p.group_name === rg.group_name);
 
           relevantProgs.forEach(prog => {
-            // A) Gruppendritter kommt weiter
             if (realThirdsReachedKO.includes(groupThirdTeam)) {
               const userExpectedQualifiers = [...(prog.reached_ko || []), ...(prog.reached_ko_best_thirds || [])];
               if (userExpectedQualifiers.includes(groupThirdTeam)) {
                 pointsEntries.push(createPointEntry(prog.player_id, 'PROGNOSIS_PATH', POINTS_CONFIG.PROG_REACH_16, groupThirdTeam, 1, rg.group_name, mId, mOrder, { original: POINTS_CONFIG.PROG_REACH_16 }));
               }
             }
-            // B) Gruppendritter scheidet aus
             if (realDroppedOut.includes(groupThirdTeam) && groupThirdTeam !== rg.rank_4) {
               if (prog.dropped_out?.includes(groupThirdTeam)) {
                 pointsEntries.push(createPointEntry(prog.player_id, 'PROGNOSIS_PATH', POINTS_CONFIG.PROG_OUT_VORRUNDE, groupThirdTeam, 1, rg.group_name, mId, mOrder, { original: POINTS_CONFIG.PROG_OUT_VORRUNDE }));
@@ -211,7 +287,6 @@ export async function processPrognosisPoints(allMatches, currentMatch, forcedGro
     if (userKOProgs) {
       const validKOProgs = userKOProgs.filter(p => p.reached_16 || p.reached_8 || p.reached_4 || p.reached_2 || p.winner_final);
       
-      // FIX: progKey korrigiert auf die Zielrunde, die der Gewinner ERREICHT
       const roundMapping = {
         1: { name: "Sechzehntelfinale", progKey: 'reached_8', pts: POINTS_CONFIG.PROG_REACH_8, dropKey: 'drop_out_16', dropPts: POINTS_CONFIG.PROG_OUT_16 },
         2: { name: "Achtelfinale", progKey: 'reached_4', pts: POINTS_CONFIG.PROG_REACH_4, dropKey: 'drop_out_8', dropPts: POINTS_CONFIG.PROG_OUT_8 },
@@ -229,10 +304,8 @@ export async function processPrognosisPoints(allMatches, currentMatch, forcedGro
           const divisor = POINTS_CONFIG.DIVISORS[prog.phase_id] || 1;
           
           if (!activeRound.isFinalsRound) {
-            // GEWINNER-CHECK
             let isWinnerPredicted = false;
             if (activeRound.isSemifinal) {
-              // Halbfinale-Gewinner zieht ins Finale ein (muss unter winner_final oder loser_final getippt sein)
               isWinnerPredicted = (prog.winner_final === realWinnerOfThisMatch || prog.loser_final === realWinnerOfThisMatch);
             } else {
               const progTeams = Array.isArray(prog[activeRound.progKey]) ? prog[activeRound.progKey] : [prog[activeRound.progKey]];
@@ -243,7 +316,6 @@ export async function processPrognosisPoints(allMatches, currentMatch, forcedGro
               pointsEntries.push(createPointEntry(prog.player_id, 'PROGNOSIS_PATH', activeRound.pts / divisor, realWinnerOfThisMatch, prog.phase_id, "KO", mId, mOrder, { original: activeRound.pts, divisor, roundName: activeRound.name, isWinner: true }));
             }
             
-            // VERLIERER-CHECK (Ausscheiden)
             if (activeRound.dropKey) {
               const progDropped = Array.isArray(prog[activeRound.dropKey]) ? prog[activeRound.dropKey] : [prog[activeRound.dropKey]];
               if (progDropped.includes(realLoserOfThisMatch)) {
@@ -251,7 +323,6 @@ export async function processPrognosisPoints(allMatches, currentMatch, forcedGro
               }
             }
           } else {
-            // FINALE & PLATZ 3 (Unverändert korrekt)
             const isChampMatch = (mOrder === 79 || currentMatch.ko_order === 0);
             if (isChampMatch) {
               if (prog.winner_final && realKO.winner_final === prog.winner_final && prog.winner_final === realWinnerOfThisMatch) {
@@ -301,6 +372,7 @@ export async function processPrognosisPoints(allMatches, currentMatch, forcedGro
   }
 }
 
+// --- ENGINE INNER HELPER: BAUEN DER DB-RECORDS ---
 function createPointEntry(playerId, category, points, team, phase, groupName, matchId, matchOrder, extra = {}) {
   let typeLabel = category === "GROUP_RANK" ? "Tabellenplatz" : "Turnier-Pfad";
   let detailDesc = `Erfolgreiche Prognose in Phase ${phase}`;

@@ -10,6 +10,7 @@ import AdminResultsPage from "./AdminResultsPage";
 import AdminControlCenter from "./AdminControlCenter";
 import PointsAnalysisPage from "./PointsAnalysisPage";
 import BonusQuestions from "./BonusQuestions";
+import SupportFeedbackPage from "./SupportFeedbackPage"; 
 
 const Dashboard = ({ player, onLogout }) => {
   const [activePhase, setActivePhase] = useState("ranking");
@@ -42,13 +43,11 @@ const Dashboard = ({ player, onLogout }) => {
         supabase.from("player").select("id, name, display_name")
       ]);
 
-      // FIX: Wir speichern die Rohdaten in einer lokalen Variable...
       const phasesData = phasesRes.data || [];
       setAllPhases(phasesData);
       setSystemConfig(configRes.data);
       setNextMatches(matchesRes.data || []);
 
-      // ...und suchen direkt in dieser Variable, damit es sofort verfügbar ist!
       const phase1 = phasesData.find(p => Number(p.id) === 1);
       setIsPhase1Locked(phase1 ? (phase1.is_submitted || configRes.data?.tips_locked_global) : false);
 
@@ -102,7 +101,7 @@ const Dashboard = ({ player, onLogout }) => {
             </button>
           ))}
 
-          {/* 🌟 NEUER REITER FÜR BONUSFRAGEN */}
+          {/* REITER FÜR BONUSFRAGEN */}
           <button 
             onClick={() => setActivePhase("bonus_questions")} 
             style={getPhaseButtonStyle(activePhase === "bonus_questions", systemConfig?.current_phase_id === 1)}
@@ -123,7 +122,7 @@ const Dashboard = ({ player, onLogout }) => {
             </>
           )}
 
-          {/* Statistiken Bereich */}
+          {/* Statistiken Bereich & Support */}
           <hr style={DASHBOARD_STYLES.divider} />
           <p style={DASHBOARD_STYLES.sectionHeader}>Statistiken</p>
           <button 
@@ -131,6 +130,14 @@ const Dashboard = ({ player, onLogout }) => {
             style={getTabButtonStyle(activePhase === "points_analysis")}
           >
             📊 Punkte-Analyse
+          </button>
+          
+          {/* HIER: Der neue Button für Support & Feedback */}
+          <button 
+            onClick={() => setActivePhase("support_feedback")} 
+            style={getTabButtonStyle(activePhase === "support_feedback")}
+          >
+            💬 Support & Feedback
           </button>
         </nav>
 
@@ -193,6 +200,13 @@ const Dashboard = ({ player, onLogout }) => {
               <PointsAnalysisPage userId={player.id} />
             ) : activePhase === "bonus_questions" ? (
               <BonusQuestions userId={player.id} isReadOnly={isPhase1Locked} />
+            ) : activePhase === "support_feedback" ? (
+              /* HIER: Unsere neue Komponente binden wir ein und übergeben die nötigen Props */
+              <SupportFeedbackPage 
+                playerId={player.id} 
+                playerName={displayName} 
+                isAdmin={player.is_admin} 
+              />
             ) : (
               <TippsPage player={player} phaseId={activePhase} isAdmin={player.is_admin} />
             )}

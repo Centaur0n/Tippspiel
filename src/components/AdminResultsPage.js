@@ -3,9 +3,14 @@ import { supabase } from "../supabaseClient";
 import { calculateFIFADataTable } from "../logic/tournamentLogic"; 
 import { getTopPosition, resolveSlot, getTeamFromPrevious } from "../logic/koLogic";
 import { getBestThirds } from "../Utils/calcTable";
-import { calculateDetailedMatchPoints, getDynamicWinnerPoints } from "../logic/pointsEngine";
 import { syncRealTournamentState } from "../logic/realStateSync";
-import { processPrognosisPoints } from "../logic/pointsEngine";
+
+// HIER: processStandardMatchTips hinzugefügt!
+import { 
+  processStandardMatchTips, 
+  processPrognosisPoints, 
+  getDynamicWinnerPoints 
+} from "../logic/pointsEngine";
 
 // Komponenten
 import GroupTable from './GroupTable';
@@ -52,15 +57,12 @@ function AdminResultsPage({ phaseId, onUpdate }) {
     setManualRanks(rankMap);
   }
 
-  // --- HARD RESET FUNKTION ---
   async function forceHardResetKO() {
     if (!window.confirm("Wirklich ALLE KO-Ergebnisse löschen und den gesamten KO-Baum auf Platzhalter zurücksetzen?")) return;
     setLoading(true);
     
-    // Alle KO-Spiele holen
     const { data: koMatches } = await supabase.from("match").select("*").eq("stage", "ko");
     
-    // Jedes KO-Spiel auf Urzustand setzen
     for (const m of koMatches) {
       await supabase.from("match").update({
         goals_a_real: null, 
@@ -97,12 +99,7 @@ function AdminResultsPage({ phaseId, onUpdate }) {
     });
   }
 
-  async function fetchWinnerPoints(teamA, teamB) {
-    const { data: teams } = await supabase.from('teams').select('name, fifa_rank').in('name', [teamA, teamB]);
-    if (!teams || teams.length < 2) return 4;
-    return getDynamicWinnerPoints(teams.find(t => t.name === teamA)?.fifa_rank || 50, teams.find(t => t.name === teamB)?.fifa_rank || 50);
-  }
-
+  // --- HIER IST JETZT ALLES STRUKTURIERT UND SCHLANK ---
   async function saveRealResult(matchId, goalsA, goalsB, winner) {
     const isReset = goalsA === "" || goalsB === "" || goalsA === null || goalsB === null;
     const gA = isReset ? null : Number(goalsA);
@@ -122,47 +119,17 @@ function AdminResultsPage({ phaseId, onUpdate }) {
     const dynamicCurrentMatch = refreshedMatches.find(m => m.id === matchId);
 
     // 2. Bestimme die richtige Phase für die Punkte-Gutschrift
-    // KO-Spiele gehören fix zu Phase 2, Gruppenspiele zur aktuellen phaseId
     const targetPhase = dynamicCurrentMatch?.stage === "ko" ? 2 : phaseId;
 
-    // Alte Match-Punkte für dieses Spiel löschen
-    await supabase.from("user_points_detail").delete().eq("match_id", matchId).eq("is_prognosis", false);
-
     if (!isReset && dynamicCurrentMatch) {
-      const winnerPoints = await fetchWinnerPoints(dynamicCurrentMatch.team_a, dynamicCurrentMatch.team_b);
-      const { data: allTips } = await supabase.from("tip").select("*").eq("match_id", matchId);
+      // CHEF-AUFRUF: Berechnet alle Standard-Tipps über die pointsEngine
+      await processStandardMatchTips(dynamicCurrentMatch, targetPhase);
       
-      if (allTips?.length > 0) {
-        // FILTER: Nur Tipps verarbeiten, die der targetPhase entsprechen (beseitigt die Fake-Tipps aus Phase 1)
-        const validTips = allTips.filter(t => Number(t.phase_id) === targetPhase || !t.phase_id);
-
-        const pointsToInsert = validTips.map(t => {
-          const result = calculateDetailedMatchPoints(
-            { goals_a: t.goals_a, goals_b: t.goals_b, winner: t.winner }, 
-            { goals_a: gA, goals_b: gB, winner: finalWinner }, 
-            winnerPoints
-          );
-          return { 
-            player_id: t.player_id, 
-            match_id: matchId, 
-            match_order: dynamicCurrentMatch.match_order, 
-            phase_id: targetPhase, // Hier korrekt zuordnen!
-            group_name: dynamicCurrentMatch.group_name || "KO", 
-            points_total: result.total, 
-            breakdown: result.breakdown, 
-            category: 'MATCH', 
-            is_prognosis: false 
-          };
-        });
-
-        if (pointsToInsert.length > 0) {
-          await supabase.from("user_points_detail").insert(pointsToInsert);
-        }
-      }
-    }
-
-    if (dynamicCurrentMatch) {
+      // CHEF-AUFRUF: Berechnet die Turnierpfad-Prognosen
       await processPrognosisPoints(refreshedMatches, dynamicCurrentMatch, dynamicCurrentMatch.stage === "ko" ? null : dynamicCurrentMatch.group_name, false);
+    } else {
+      // Falls das Ergebnis gelöscht wurde (Reset), putzen wir die alten Punkte weg
+      await supabase.from("user_points_detail").delete().eq("match_id", matchId).eq("is_prognosis", false);
     }
 
     if (onUpdate) onUpdate();

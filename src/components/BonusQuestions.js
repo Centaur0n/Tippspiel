@@ -5,12 +5,12 @@ import { ALL_TEAMS, POT_4_TEAMS } from "../Utils/teamUtils";
 
 const BONUS_QUESTIONS_CONFIG = [
   { id: "total_goals", text: "Meisten Gesamttore in einem einzelnen Spiel", type: "number" },
-  { id: "most_cards", text: "Meisten roten/gelben Karten vom Team/Spieler", type: "text" },
+  { id: "most_cards", text: "Meisten roten und gelben Karten vom Team pro Spiel (Fifa Fairplay Wertung)", type: "text" },
   { id: "most_team_goals", text: "Team mit den meisten Toren pro Spiel", type: "text" },
-  { id: "extra_times", text: "Wie viele Verlängerungen/Elfmeterschießen gibt es in der KO-Phase?", type: "number" },
+  { id: "extra_times", text: "Wie viele Verlängerungen (mit oder ohne Elfmeterschießen) gibt es in der gesamten KO-Phase?", type: "number" },
   { id: "most_conceded_goals", text: "Welches Team kassiert in der Gruppenphase die meisten Tore?", type: "text" },
-  { id: "pot4_furthest", text: "Welches Team aus dem Topf 4 von FIFA kommt am weitesten?", type: "text" },
-  { id: "own_goals", text: "Wie viele Eigentore gibt es im Turnier?", type: "number" }
+  { id: "pot4_furthest", text: "Welches Team aus dem Lostopf 4 von FIFA kommt am weitesten?", type: "text" },
+  { id: "own_goals", text: "Wie viele Eigentore gibt es im gesamten Turnier?", type: "number" }
 ];
 
 const BonusQuestions = ({ userId, isReadOnly }) => {
