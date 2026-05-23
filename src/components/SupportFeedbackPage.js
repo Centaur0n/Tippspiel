@@ -6,21 +6,22 @@ const FAQ_DATA = [
   {
     category: "⚽ Rund ums Tippen",
     items: [
-      { q: "Bis wann kann ich meine Tipps abgeben?", a: "Tipps können bis exakt 5 Minuten vor dem jeweiligen Anpfiff eingetragen und geändert werden. Danach sperrt das System das Spiel automatisch." },
-      { q: "Kann ich die Tipps der anderen Spieler sehen?", a: "Ja, aber erst sobald das jeweilige Spiel angepfiffen wurde. Das sorgt für absolute Fairness." }
+      { q: "Bis wann kann ich meine Tipps abgeben?", a: "Tipps können bis einen Tag vor dem jeweiligen Phassenanfang eingetragen und geändert werden. Danach werden die Tipps gesperrt und können nur noch angeschaut werden." },
+      { q: "Warum gibt es 5 verschiedene Phasen in denen ich Tipps abgenen muss?", a: "In der ersten Phase tippt ihr alle Gruppenspiele. Der KO-Baum der dann entsteht basiert dann auf den eigenen Tipps und deswegen wird hier nur Sieger/Verliere getippt. Wenn das später auch so eintritt gibt es dafür extra Punkte. Wenn dann die wahren Sechzehntelfinale bekannt sind wird dann in Phase 2 wieder erneut getippt und das Spiel geht von vorne los. Das ganze soll dann also eine Mischung aus Tipps sein und Vermutungen welches Team wie weit im Turnier kommt." }
     ]
   },
   {
     category: "🏆 Punkteverteilung",
     items: [
-      { q: "Wie berechnen sich die Punkte?", a: "Exaktes Ergebnis = 4 Punkte. Richtige Tordifferenz = 3 Punkte. Richtige Tendenz (Sieg/Unentschieden) = 2 Punkte." },
-      { q: "Was bedeuten die dynamischen FIFA-Punkte?", a: "Bei Gruppenspielen gibt es für den richtigen Sieger Zusatzpunkte, wenn das siegreiche Team in der FIFA-Weltrangliste deutlich schlechter platziert ist als der Gegner (Außenseiter-Bonus)." }
+      { q: "Wie berechnen sich die Punkte?", a: "Exaktes Ergebnis = +3 Punkte. Richtige Tordifferenz = +2 Punkte. Richtige Tendenz (Sieg/Unentschieden) = +4 Punkte. Richtige Toranzahl Team A/Team B/Gesamtanzahl = jeweils +1 Punkt." },
+      { q: "Wie werden die Prognosepunkte vergeben?", a: "Es gibt immer Punkte wenn ein Team weiterkommt/ausscheidet und man das selber auch getippt hat. Das zählt für jede Phase und jede Art von Finale." }
     ]
   },
   {
     category: "💻 Technische Fragen",
     items: [
-      { q: "Meine Punkte wurden nach Abpfiff nicht direkt aktualisiert?", a: "Die Auswertung erfolgt manuell durch den Admin kurz nach Spielende. Hab einfach ein paar Minuten Geduld." }
+      { q: "Meine Punkte wurden nach Abpfiff nicht direkt aktualisiert?", a: "Die Auswertung erfolgt manuell durch den Admin kurz nach Spielende. Hab einfach ein paar Minuten Geduld." },
+      { q: "Ich habe einen Fehler gefunden oder mir kommt etwas nicht richtig vor, was kann ich machen?",a: "Gerne ein Bug-Report abschließen, oder dem Admin selber schreiben. " }
     ]
   }
 ];

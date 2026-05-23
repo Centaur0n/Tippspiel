@@ -1,8 +1,40 @@
 /**
  * tournamentLogic.js / calcTable.js
- * * Diese Datei berechnet aus den einzelnen Spielergebnissen (Tipps) 
- * eine vollständige Gruppentabelle nach FIFA-Standard.
+ * Diese Datei berechnet aus den einzelnen Spielergebnissen (Tipps) 
+ * eine vollständige Gruppentabelle nach FIFA-Standard und steuert die Turnierstruktur.
  */
+
+/**
+ * ERMITTELT DIE PHASE_ID EINES SPIELS (Neu integriert)
+ * Hilft dem Admin und der Punkteberechnung, Spiele ohne manuelle Dropdowns
+ * der exakten Tipp-Phase zuzuordnen.
+ * * @param {Object} match - Das Spiel-Objekt aus der Datenbank
+ * @returns {number} phaseId
+ */
+export function getPhaseIdFromMatch(match) {
+  if (!match) return 1;
+
+  // 1. Gruppenphase ist immer Phase 1
+  if (match.stage === "group") {
+    return 1;
+  }
+
+  // 2. KO-Phase Zuordnung basierend auf stage_order
+  if (match.stage === "ko") {
+    const stageOrder = Number(match.stage_order);
+    
+    switch (stageOrder) {
+      case 1: return 2; // Achtelfinale
+      case 2: return 3; // Viertelfinale
+      case 3: return 4; // Halbfinale
+      case 4: return 5; // Finale & Spiel um Platz 3
+      case 5: return 5; // Absicherung für Spezial-Matrix-Einträge
+      default: return 2;
+    }
+  }
+
+  return 1;
+}
 
 /**
  * BASIS-BERECHNUNG: Erstellt eine Liste mit Punkten und Toren.
@@ -10,17 +42,22 @@
 export function calculateTable(groupMatches, currentTips) {
   const table = {};
 
+  // LOGIK-KORREKTUR: Vorab-Initialisierung aller Teams einer Gruppe.
+  // Wenn ein User die Seite frisch öffnet und noch keine Tipps eingetragen hat,
+  // würden die Teams sonst komplett aus der Tabelle verschwinden.
+  groupMatches.forEach((m) => {
+    if (!table[m.team_a]) table[m.team_a] = { points: 0, goals: 0, conceded: 0 };
+    if (!table[m.team_b]) table[m.team_b] = { points: 0, goals: 0, conceded: 0 };
+  });
+
   groupMatches.forEach((m) => {
     const t = currentTips[m.id];
-    // Falls für ein Spiel noch kein Tipp existiert, überspringen wir es
+    // Falls für ein Spiel noch kein Tipp existiert, überspringen wir die Punktevergabe,
+    // das Team bleibt aber dank der Vorab-Initialisierung mit 0 Punkten in der Tabelle.
     if (!t) return;
 
     const A = m.team_a; 
     const B = m.team_b;
-
-    // Initialisierung der Teams im Tabellen-Objekt, falls noch nicht geschehen
-    if (!table[A]) table[A] = { points: 0, goals: 0, conceded: 0 };
-    if (!table[B]) table[B] = { points: 0, goals: 0, conceded: 0 };
 
     const gA = Number(t.goals_a); 
     const gB = Number(t.goals_b);
@@ -51,7 +88,7 @@ export function calculateTable(groupMatches, currentTips) {
  * @param {Object} manualRanks - Hilfsmittel für den "Losentscheid" (Stichwahl)
  */
 export function calculateFIFADataTable(groupMatches, tips, manualRanks = {}) {
-  // 1. Grundwerte (Punkte, Tore etc.) mit der obigen Funktion berechnen
+  // 1. Grundwerte (Punkte, Tore etc.) berechnen
   let table = calculateTable(groupMatches, tips);
 
   // 2. Präzise Sortierung nach sportlichen Kriterien
@@ -66,15 +103,12 @@ export function calculateFIFADataTable(groupMatches, tips, manualRanks = {}) {
     if (b.goals !== a.goals) return b.goals - a.goals;
 
     // D. STICHWAHL (Losentscheid/Manueller Rang)
-    // Wenn alles gleich ist, entscheidet ein manueller Rang (z.B. durch UI-Eingabe).
-    // Ein kleinerer Rang (1) ist besser als ein großer (99).
     const rankA = manualRanks[a.team] !== undefined && manualRanks[a.team] !== null ? manualRanks[a.team] : 99;
     const rankB = manualRanks[b.team] !== undefined && manualRanks[b.team] !== null ? manualRanks[b.team] : 99;
     
     if (rankA !== rankB) return rankA - rankB;
 
-    // E. NOTNAGEL: Alphabetische Sortierung
-    // Damit die Tabelle bei Gleichstand nicht "hüpft", sortieren wir nach Name.
+    // E. NOTNAGEL: Alphabetische Sortierung gegen "hüpfende" UI
     return a.team.localeCompare(b.team);
   });
 

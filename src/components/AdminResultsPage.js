@@ -1,11 +1,13 @@
 import React, { useEffect, useState, useRef } from "react";
 import { supabase } from "../supabaseClient";
-import { calculateFIFADataTable } from "../logic/tournamentLogic"; 
 import { getTopPosition, resolveSlot, getTeamFromPrevious } from "../logic/koLogic";
 import { getBestThirds } from "../Utils/calcTable";
 import { syncRealTournamentState } from "../logic/realStateSync";
 
-// HIER: processStandardMatchTips hinzugefügt!
+// LOGIK-FUNKTIONEN: getPhaseIdFromMatch hier importiert!
+import { calculateFIFADataTable, getPhaseIdFromMatch } from "../logic/tournamentLogic"; 
+
+// POINTS-ENGINE: Für die Punkte-Gutschriften
 import { 
   processStandardMatchTips, 
   processPrognosisPoints, 
@@ -99,7 +101,6 @@ function AdminResultsPage({ phaseId, onUpdate }) {
     });
   }
 
-  // --- HIER IST JETZT ALLES STRUKTURIERT UND SCHLANK ---
   async function saveRealResult(matchId, goalsA, goalsB, winner) {
     const isReset = goalsA === "" || goalsB === "" || goalsA === null || goalsB === null;
     const gA = isReset ? null : Number(goalsA);
@@ -118,11 +119,11 @@ function AdminResultsPage({ phaseId, onUpdate }) {
     const { data: refreshedMatches } = await supabase.from("match").select("*").order("match_order");
     const dynamicCurrentMatch = refreshedMatches.find(m => m.id === matchId);
 
-    // 2. Bestimme die richtige Phase für die Punkte-Gutschrift
-    const targetPhase = dynamicCurrentMatch?.stage === "ko" ? 2 : phaseId;
+    // 2. DYNAMISCHE PHASEN-ERMITTLUNG: Nutzt jetzt die FIFA-Logik-Funktion
+    const targetPhase = getPhaseIdFromMatch(dynamicCurrentMatch);
 
     if (!isReset && dynamicCurrentMatch) {
-      // CHEF-AUFRUF: Berechnet alle Standard-Tipps über die pointsEngine
+      // CHEF-AUFRUF: Berechnet alle Standard-Tipps über die pointsEngine unter der korrekten Phase
       await processStandardMatchTips(dynamicCurrentMatch, targetPhase);
       
       // CHEF-AUFRUF: Berechnet die Turnierpfad-Prognosen
