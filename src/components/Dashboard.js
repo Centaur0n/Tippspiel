@@ -13,7 +13,11 @@ import AdminControlCenter from "./AdminControlCenter";
 import PointsAnalysisPage from "./PointsAnalysisPage";
 import BonusQuestions from "./BonusQuestions";
 import SupportFeedbackPage from "./SupportFeedbackPage"; 
-import ProfilePage from "./Profile"; // Importiert als vollwertige Seite
+import ProfilePage from "./Profile"; 
+import StatisticsPage from "./StatisticsPage";
+
+// --- TOUR COMPONENT & CONFIG IMPORT ---
+import InteractiveTour, { TOUR_STEPS } from "./InteractiveTour";
 
 const Dashboard = ({ player, onLogout }) => {
   const [localPlayer, setLocalPlayer] = useState(player);
@@ -24,6 +28,10 @@ const Dashboard = ({ player, onLogout }) => {
   const [allPhases, setAllPhases] = useState([]); 
   const [loading, setLoading] = useState(true);
   const [isPhase1Locked, setIsPhase1Locked] = useState(false);
+  
+  // Neue synchrone Tour States
+  const [tourStep, setTourStep] = useState(0);
+  const [tourSubStep, setTourSubStep] = useState(0);
 
   // Initialer Datencheck beim Laden der Komponente
   useEffect(() => {
@@ -36,6 +44,18 @@ const Dashboard = ({ player, onLogout }) => {
     }
   }, [activePhase]);
 
+  // DB-Check für das Tutorial
+  useEffect(() => {
+    if (!loading && localPlayer?.id) {
+      // Wenn finished_tutorial in der DB false ist, startet das Tutorial automatisch
+      if (localPlayer.finished_tutorial === false) {
+        setTourStep(1);
+        setTourSubStep(1);
+        setActivePhase("profile"); // Direkt auf die erste Tutorial-Seite leiten
+      }
+    }
+  }, [loading, localPlayer?.finished_tutorial, localPlayer?.id]);
+
   async function fetchDashboardData() {
     if (allPhases.length === 0) setLoading(true);
     try {
@@ -44,7 +64,7 @@ const Dashboard = ({ player, onLogout }) => {
         supabase.from("tip_phase").select("*").order("id", { ascending: true }),
         supabase.from("match").select("*").order("match_order", { ascending: true }).limit(3),
         supabase.from("user_points_detail").select("player_id, points_total"),
-        supabase.from("player").select("id, name, display_name, name_color, jersey_number, supported_country")
+        supabase.from("player").select("id, name, display_name, name_color, jersey_number, supported_country, finished_tutorial, is_admin")
       ]);
 
       const phasesData = phasesRes.data || [];
@@ -67,7 +87,6 @@ const Dashboard = ({ player, onLogout }) => {
       calculatedRanking.sort((a, b) => b.points - a.points);
       setRanking(calculatedRanking);
 
-      // Eigene Daten im lokalen State synchron halten
       const currentMe = players.find(p => Number(p.id) === Number(localPlayer.id));
       if (currentMe) {
         setLocalPlayer(prev => ({ ...prev, ...currentMe }));
@@ -79,7 +98,84 @@ const Dashboard = ({ player, onLogout }) => {
     }
   }
 
-  // Profil-Speicher-Logik (Verbindung mit Supabase-Backend)
+  // Hilfsfunktion: Ermittelt die ID der ersten aktiven Tipp-Phase
+  const getFirstActivePhaseId = () => {
+    const firstActive = allPhases.find(p => p.is_active);
+    return firstActive ? firstActive.id : "ranking";
+  };
+
+  // Synchroner Tour-Wechsel-Handler gegen den Verschiebungs-Bug
+  const handleTourNext = async () => {
+    const currentStepData = TOUR_STEPS[tourStep];
+    const totalSteps = Object.keys(TOUR_STEPS).length;
+    
+    // Fall A: Es gibt noch einen Teilschritt im aktuellen Hauptschritt
+    if (tourSubStep < currentStepData.subSteps.length) {
+      setTourSubStep(prev => prev + 1);
+    } 
+    // Fall B: Letzter Teilschritt erreicht -> Wechsel zum nächsten Hauptschritt
+    else if (tourStep < totalSteps) {
+      const nextStep = tourStep + 1;
+      let nextPhase = TOUR_STEPS[nextStep].phase;
+      
+      if (nextPhase === "FIRST_ACTIVE_PHASE") {
+        nextPhase = getFirstActivePhaseId();
+      }
+
+      // Synchroner Zustandswechsel: Erst UI-Phase umschalten, dann Text-IDs anpassen
+      setActivePhase(nextPhase);
+      setTourStep(nextStep);
+      setTourSubStep(1);
+    } 
+    // Fall C: Das komplette Tutorial wurde erfolgreich beendet
+    else {
+      await finishTutorialInDB();
+    }
+  };
+
+  const handleTourSkip = async () => {
+    await finishTutorialInDB();
+  };
+
+  // Schreibt den Zustand "true" permanent in die Supabase-DB
+  const finishTutorialInDB = async () => {
+    try {
+      const { error } = await supabase
+        .from("player")
+        .update({ finished_tutorial: true })
+        .eq("id", localPlayer.id);
+
+      if (error) throw error;
+
+      setLocalPlayer(prev => ({ ...prev, finished_tutorial: true }));
+      setTourStep(0);
+      setTourSubStep(0);
+      setActivePhase("ranking");
+    } catch (err) {
+      console.error("Fehler beim Speichern des Tutorialstatus:", err);
+    }
+  };
+
+  // Reset-Handler für den Button im Profil
+  const handleResetTutorial = async () => {
+    try {
+      const { error } = await supabase
+        .from("player")
+        .update({ finished_tutorial: false })
+        .eq("id", localPlayer.id);
+
+      if (error) throw error;
+
+      // Lokalen Status zurücksetzen & Tour direkt auf Phase 1 abfeuern
+      setLocalPlayer(prev => ({ ...prev, finished_tutorial: false }));
+      setActivePhase("profile");
+      setTourStep(1);
+      setTourSubStep(1);
+    } catch (err) {
+      console.error("Fehler beim Zurücksetzen des Tutorials:", err);
+    }
+  };
+
   const handleProfileSave = async (updatedData) => {
     try {
       const { error } = await supabase
@@ -94,11 +190,7 @@ const Dashboard = ({ player, onLogout }) => {
         .eq("id", updatedData.id);
 
       if (error) throw error;
-
-      // Lokalen State aktualisieren für Sofort-Effekt im UI
       setLocalPlayer(prev => ({ ...prev, ...updatedData }));
-      
-      // Rangliste neu laden, damit die Änderungen für alle sichtbar berechnet werden
       fetchDashboardData();
     } catch (err) {
       console.error("Fehler beim Updaten des Profils:", err);
@@ -110,92 +202,79 @@ const Dashboard = ({ player, onLogout }) => {
 
   const displayName = localPlayer.display_name && localPlayer.display_name !== "EMPTY" ? localPlayer.display_name : localPlayer.name;
 
+  // Hilfsfunktion zur Ermittlung des Punch-Through Spotlight-Styles im Sidebar-Menü
+  const getSidebarHighlightStyle = (elementId) => {
+    const currentStepData = TOUR_STEPS[tourStep];
+    if (!currentStepData) return {};
+    
+    const currentSubStepData = currentStepData.subSteps[tourSubStep - 1];
+    if (currentSubStepData?.id === elementId) {
+      return {
+        position: "relative",
+        zIndex: 9999, // Bricht glasklar durch das Overlay durch
+        boxShadow: "0 0 0 4px #f59e0b, 0 10px 25px rgba(0,0,0,0.4)",
+        borderRadius: "8px",
+        backgroundColor: "#ffffff",
+        transition: "all 0.2s ease"
+      };
+    }
+    return {};
+  };
+
   return (
     <div style={DASHBOARD_STYLES.layout}>
       
       {/* 🟣 SIDEBAR */}
       <aside style={DASHBOARD_STYLES.sidebar}>
         
-        {/* RESTRUKTURIERTE PROFILE BOX */}
+        {/* PROFILE BOX */}
         <div style={{ 
           ...DASHBOARD_STYLES.profileBox, 
           display: "flex", 
           flexDirection: "column",
           gap: "14px", 
           padding: "16px",
-          boxSizing: "border-box"
+          boxSizing: "border-box",
+          border: DASHBOARD_STYLES.profileBox.border,
+          transition: "all 0.3s ease"
         }}>
-          {/* OBERE ZEILE: Trikot-Icon links, Text-Stack rechts */}
           <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
               <RetroJersey color={localPlayer.name_color} number={localPlayer.jersey_number} size={48} />
             </div>
 
             <div style={{ display: "flex", flexDirection: "column", minWidth: 0, flexGrow: 1 }}>
-              {/* Zeile 1: Name & Flagge */}
               <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
-                <h2 
-                  style={{ 
-                    fontSize: "1.15rem", 
-                    margin: 0, 
-                    fontWeight: "800",
-                    color: localPlayer.name_color || "#FFFFFF",
-                    transition: "color 0.2s ease",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap"
-                  }}
-                >
+                <h2 style={{ 
+                  fontSize: "1.15rem", margin: 0, fontWeight: "800",
+                  color: localPlayer.name_color || "#FFFFFF",
+                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"
+                }}>
                   {displayName}
                 </h2>
-                {localPlayer.supported_country && (
-                  <FlagIcon teamName={localPlayer.supported_country} />
-                )}
+                {localPlayer.supported_country && <FlagIcon teamName={localPlayer.supported_country} />}
               </div>
               
-              {/* Zeile 2: FIX - Admin/Spieler Tag direkt unter dem Namen */}
               <div style={{ marginTop: "4px" }}>
                 <span style={{ ...DASHBOARD_STYLES.badge, margin: 0, opacity: 0.9, display: "inline-block" }}>
                   {localPlayer.is_admin ? "Admin" : "Spieler"}
                 </span>
               </div>
               
-              {/* Zeile 3: Trikotnummer */}
               <div style={{ fontSize: "0.8rem", color: "rgba(255, 255, 255, 0.6)", fontWeight: "600", marginTop: "4px" }}>
                 Trikotnummer: #{localPlayer.jersey_number || "—"}
               </div>
             </div>
           </div>
           
-          {/* UNTERE ZEILE: Sauberer Einstellungsbutton über die volle Breite */}
           <div style={{ display: "flex", marginTop: "2px", width: "100%" }}>
             <button
               onClick={() => setActivePhase("profile")}
               style={{
-                padding: "8px 14px",
-                borderRadius: "8px",
-                border: "1px solid #cbd5e1",
-                backgroundColor: "white",
-                color: "#2563eb",
-                cursor: "pointer",
-                fontWeight: "600",
-                fontSize: "13px",
-                transition: "all 0.15s ease",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: "6px",
-                boxShadow: "0 1px 2px 0 rgba(0, 0, 0, 0.05)",
-                userSelect: "none",
-                width: "100%"
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor = "#f8fafc";
-                e.currentTarget.style.borderColor = "#94a3b8";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = "white";
-                e.currentTarget.style.borderColor = "#cbd5e1";
+                padding: "8px 14px", borderRadius: "8px", border: "1px solid #cbd5e1",
+                backgroundColor: "white", color: "#2563eb", cursor: "pointer",
+                fontWeight: "600", fontSize: "13px", display: "flex",
+                alignItems: "center", justifyContent: "center", gap: "6px", width: "100%"
               }}
             >
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -207,27 +286,38 @@ const Dashboard = ({ player, onLogout }) => {
           </div>
         </div>
 
+        {/* NAVIGATION */}
         <nav style={DASHBOARD_STYLES.nav}>
-          <button onClick={() => setActivePhase("ranking")} style={getTabButtonStyle(activePhase === "ranking")}>
+          <button 
+            onClick={() => setActivePhase("ranking")} 
+            style={{ ...getTabButtonStyle(activePhase === "ranking"), ...getSidebarHighlightStyle("dashboard_overview") }}
+          >
             🏠 Startseite
           </button>
           
           <hr style={DASHBOARD_STYLES.divider} />
           <p style={DASHBOARD_STYLES.sectionHeader}>Tipp-Runden</p>
           
-          {allPhases.filter(p => p.is_active).map((p) => (
-            <button 
-              key={p.id} 
-              onClick={() => setActivePhase(p.id)} 
-              style={getPhaseButtonStyle(activePhase === p.id, systemConfig?.current_phase_id === p.id)}
-            >
-              Phase {p.id} {p.is_submitted && " 🔒"} 
-            </button>
-          ))}
+          <div style={getSidebarHighlightStyle("sidebar_phases")}>
+            {allPhases.filter(p => p.is_active).map((p) => {
+              return (
+                <button 
+                  key={p.id} 
+                  onClick={() => setActivePhase(p.id)} 
+                  style={getPhaseButtonStyle(activePhase === p.id, systemConfig?.current_phase_id === p.id)}
+                >
+                  Phase {p.id} {p.is_submitted && " 🔒"} 
+                </button>
+              );
+            })}
+          </div>
 
           <button 
             onClick={() => setActivePhase("bonus_questions")} 
-            style={getPhaseButtonStyle(activePhase === "bonus_questions", systemConfig?.current_phase_id === 1)}
+            style={{
+              ...getPhaseButtonStyle(activePhase === "bonus_questions", systemConfig?.current_phase_id === 1),
+              ...getSidebarHighlightStyle("bonus_submit")
+            }}
           >
             🏆 Bonusfragen {isPhase1Locked ? " 🔒" : ""}
           </button>
@@ -247,18 +337,23 @@ const Dashboard = ({ player, onLogout }) => {
 
           <hr style={DASHBOARD_STYLES.divider} />
           <p style={DASHBOARD_STYLES.sectionHeader}>Statistiken</p>
+          
           <button 
             onClick={() => setActivePhase("points_analysis")} 
-            style={getTabButtonStyle(activePhase === "points_analysis")}
+            style={{ ...getTabButtonStyle(activePhase === "points_analysis"), ...getSidebarHighlightStyle("points_table") }}
           >
             📊 Punkte-Analyse
           </button>
+
+          <button 
+            onClick={() => setActivePhase("global_statistics")} 
+            style={{ ...getTabButtonStyle(activePhase === "global_statistics"), ...getSidebarHighlightStyle("stats_tabs") }}
+          >
+            📈 Statistik-Center
+          </button>
           
           <hr style={DASHBOARD_STYLES.divider} />
-          <button 
-            onClick={() => setActivePhase("support_feedback")} 
-            style={getTabButtonStyle(activePhase === "support_feedback")}
-          >
+          <button onClick={() => setActivePhase("support_feedback")} style={getTabButtonStyle(activePhase === "support_feedback")}>
             💬 Support & Feedback
           </button>
         </nav>
@@ -312,28 +407,17 @@ const Dashboard = ({ player, onLogout }) => {
                         <td style={{ ...DASHBOARD_STYLES.td, fontSize: "16px", fontWeight: "700" }}>
                           {index + 1}.
                         </td>
-                        
                         <td style={{ ...DASHBOARD_STYLES.td, padding: "8px 12px" }}>
                           <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
                             <RetroJersey color={entry.name_color} number={entry.jersey_number} size={36} />
-                            
                             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                              <span 
-                                style={{ 
-                                  color: entry.name_color || "#0f172a", 
-                                  fontWeight: "800",
-                                  fontSize: "1.1rem" 
-                                }}
-                              >
+                              <span style={{ color: entry.name_color || "#0f172a", fontWeight: "800", fontSize: "1.1rem" }}>
                                 {entryName}
                               </span>
-                              {entry.supported_country && (
-                                <FlagIcon teamName={entry.supported_country} />
-                              )}
+                              {entry.supported_country && <FlagIcon teamName={entry.supported_country} />}
                             </div>
                           </div>
                         </td>
-                        
                         <td style={{ ...DASHBOARD_STYLES.td, textAlign: "right", fontSize: "1.1rem" }}>
                           <strong>{entry.points}</strong>
                         </td>
@@ -349,32 +433,46 @@ const Dashboard = ({ player, onLogout }) => {
             {activePhase === "admin_control" ? (
               <AdminControlCenter onUpdate={fetchDashboardData} />
             ) : activePhase === "admin_results" ? (
-              <AdminResultsPage 
-                phaseId={systemConfig?.current_phase_id} 
-                onUpdate={fetchDashboardData} 
-              />
+              <AdminResultsPage phaseId={systemConfig?.current_phase_id} onUpdate={fetchDashboardData} />
             ) : activePhase === "profile" ? (
               <ProfilePage 
                 player={localPlayer} 
                 onSave={handleProfileSave} 
-                onBack={() => setActivePhase("ranking")} 
+                onBack={() => setActivePhase("ranking")}
+                tourStep={tourStep}
+                tourSubStep={tourSubStep}
+                onResetTutorial={handleResetTutorial} // Reicht den Reset-Handler an das Profil durch
               />
             ) : activePhase === "points_analysis" ? (
-              <PointsAnalysisPage userId={localPlayer.id} />
+              <PointsAnalysisPage userId={localPlayer.id} tourStep={tourStep} tourSubStep={tourSubStep} />
+            ) : activePhase === "global_statistics" ? (
+              <StatisticsPage currentUserId={localPlayer.id} tourStep={tourStep} tourSubStep={tourSubStep} />    
             ) : activePhase === "bonus_questions" ? (
-              <BonusQuestions userId={localPlayer.id} isReadOnly={isPhase1Locked} />
+              <BonusQuestions userId={localPlayer.id} isReadOnly={isPhase1Locked} tourStep={tourStep} tourSubStep={tourSubStep} />
             ) : activePhase === "support_feedback" ? (
-              <SupportFeedbackPage 
-                playerId={localPlayer.id} 
-                playerName={displayName} 
-                isAdmin={localPlayer.is_admin} 
-              />
+              <SupportFeedbackPage playerId={localPlayer.id} playerName={displayName} isAdmin={localPlayer.is_admin} />
             ) : (
-              <TippsPage player={localPlayer} phaseId={activePhase} isAdmin={localPlayer.is_admin} />
+              <TippsPage 
+                player={localPlayer} 
+                phaseId={activePhase} 
+                isAdmin={localPlayer.is_admin} 
+                tourStep={tourStep}
+                tourSubStep={tourSubStep}
+              />
             )}
           </div>
         )}
       </main>
+
+      {/* RENDERING DER EXTERNEN TOUR-ENGINE */}
+      {tourStep > 0 && (
+        <InteractiveTour 
+          tourStep={tourStep}
+          tourSubStep={tourSubStep}
+          onNext={handleTourNext} 
+          onSkip={handleTourSkip} 
+        />
+      )}
     </div>
   );
 };
