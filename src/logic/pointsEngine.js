@@ -78,7 +78,7 @@ export const getDynamicWinnerPoints = (rankA, rankB) => {
 };
 
 // ==========================================
-// NEU: HIER IST DIE FUNKTION FÜR DIE MATCH-TIPPS
+// FUNKTION FÜR DIE MATCH-TIPPS
 // ==========================================
 export async function processStandardMatchTips(currentMatch, phaseId) {
   if (currentMatch.goals_a_real === null || currentMatch.goals_b_real === null) return;
@@ -126,7 +126,8 @@ export async function processStandardMatchTips(currentMatch, phaseId) {
       player_id: tip.player_id,
       match_id: mId,
       match_order: currentMatch.match_order,
-      category: "MATCH", // Exakt synchronisiert mit deiner alten DB-Struktur
+      category: "MATCH",
+      matchday: currentMatch.matchday, // Sauber hinterlegt
       points_total: total,
       phase_id: phaseId,
       group_name: currentMatch.group_name || "KO",
@@ -147,7 +148,7 @@ export async function processStandardMatchTips(currentMatch, phaseId) {
     .eq("phase_id", phaseId)
     .eq("is_prognosis", false);
 
-  // 5. Per Upsert (oder Insert) speichern
+  // 5. Per Insert speichern
   if (pointsEntries.length > 0) {
     await supabase.from("user_points_detail").insert(pointsEntries);
     console.log(`[ENGINE] ===== ${pointsEntries.length} Match-Tipps erfolgreich aktualisiert! =====`);
@@ -222,7 +223,7 @@ export async function processPrognosisPoints(allMatches, currentMatch, forcedGro
           validProgs.forEach(prog => {
             ['rank_1', 'rank_2', 'rank_3', 'rank_4'].forEach((rankKey) => {
               if (prog[rankKey] === realGroup[rankKey] && realGroup[rankKey] !== null) {
-                pointsEntries.push(createPointEntry(prog.player_id, 'GROUP_RANK', POINTS_CONFIG.PROG_TABLE_POS, prog[rankKey], 1, activeGroupName, mId, mOrder));
+                pointsEntries.push(createPointEntry(prog.player_id, 'GROUP_RANK', POINTS_CONFIG.PROG_TABLE_POS, prog[rankKey], 1, activeGroupName, mId, mOrder, currentMatch.matchday));
               }
             });
 
@@ -231,13 +232,13 @@ export async function processPrognosisPoints(allMatches, currentMatch, forcedGro
 
             userQualifiers.forEach(team => {
               if (team && realQualifiers.includes(team)) {
-                pointsEntries.push(createPointEntry(prog.player_id, 'PROGNOSIS_PATH', POINTS_CONFIG.PROG_REACH_16, team, 1, activeGroupName, mId, mOrder, { original: POINTS_CONFIG.PROG_REACH_16 }));
+                pointsEntries.push(createPointEntry(prog.player_id, 'PROGNOSIS_PATH', POINTS_CONFIG.PROG_REACH_16, team, 1, activeGroupName, mId, mOrder, currentMatch.matchday, { original: POINTS_CONFIG.PROG_REACH_16 }));
               }
             });
 
             const userDroppedOut = [...(prog.dropped_out || [])];
             if (realGroup.rank_4 && userDroppedOut.includes(realGroup.rank_4)) {
-              pointsEntries.push(createPointEntry(prog.player_id, 'PROGNOSIS_PATH', POINTS_CONFIG.PROG_OUT_VORRUNDE, realGroup.rank_4, 1, activeGroupName, mId, mOrder, { original: POINTS_CONFIG.PROG_OUT_VORRUNDE }));
+              pointsEntries.push(createPointEntry(prog.player_id, 'PROGNOSIS_PATH', POINTS_CONFIG.PROG_OUT_VORRUNDE, realGroup.rank_4, 1, activeGroupName, mId, mOrder, currentMatch.matchday, { original: POINTS_CONFIG.PROG_OUT_VORRUNDE }));
             }
           });
         }
@@ -261,12 +262,12 @@ export async function processPrognosisPoints(allMatches, currentMatch, forcedGro
             if (realThirdsReachedKO.includes(groupThirdTeam)) {
               const userExpectedQualifiers = [...(prog.reached_ko || []), ...(prog.reached_ko_best_thirds || [])];
               if (userExpectedQualifiers.includes(groupThirdTeam)) {
-                pointsEntries.push(createPointEntry(prog.player_id, 'PROGNOSIS_PATH', POINTS_CONFIG.PROG_REACH_16, groupThirdTeam, 1, rg.group_name, mId, mOrder, { original: POINTS_CONFIG.PROG_REACH_16 }));
+                pointsEntries.push(createPointEntry(prog.player_id, 'PROGNOSIS_PATH', POINTS_CONFIG.PROG_REACH_16, groupThirdTeam, 1, rg.group_name, mId, mOrder, currentMatch.matchday, { original: POINTS_CONFIG.PROG_REACH_16 }));
               }
             }
             if (realDroppedOut.includes(groupThirdTeam) && groupThirdTeam !== rg.rank_4) {
               if (prog.dropped_out?.includes(groupThirdTeam)) {
-                pointsEntries.push(createPointEntry(prog.player_id, 'PROGNOSIS_PATH', POINTS_CONFIG.PROG_OUT_VORRUNDE, groupThirdTeam, 1, rg.group_name, mId, mOrder, { original: POINTS_CONFIG.PROG_OUT_VORRUNDE }));
+                pointsEntries.push(createPointEntry(prog.player_id, 'PROGNOSIS_PATH', POINTS_CONFIG.PROG_OUT_VORRUNDE, groupThirdTeam, 1, rg.group_name, mId, mOrder, currentMatch.matchday, { original: POINTS_CONFIG.PROG_OUT_VORRUNDE }));
               }
             }
           });
@@ -313,30 +314,30 @@ export async function processPrognosisPoints(allMatches, currentMatch, forcedGro
             }
 
             if (isWinnerPredicted) {
-              pointsEntries.push(createPointEntry(prog.player_id, 'PROGNOSIS_PATH', activeRound.pts / divisor, realWinnerOfThisMatch, prog.phase_id, "KO", mId, mOrder, { original: activeRound.pts, divisor, roundName: activeRound.name, isWinner: true }));
+              pointsEntries.push(createPointEntry(prog.player_id, 'PROGNOSIS_PATH', activeRound.pts / divisor, realWinnerOfThisMatch, prog.phase_id, "KO", mId, mOrder, currentMatch.matchday, { original: activeRound.pts, divisor, roundName: activeRound.name, isWinner: true }));
             }
             
             if (activeRound.dropKey) {
               const progDropped = Array.isArray(prog[activeRound.dropKey]) ? prog[activeRound.dropKey] : [prog[activeRound.dropKey]];
               if (progDropped.includes(realLoserOfThisMatch)) {
-                pointsEntries.push(createPointEntry(prog.player_id, 'PROGNOSIS_PATH', activeRound.dropPts / divisor, realLoserOfThisMatch, prog.phase_id, "KO", mId, mOrder, { original: activeRound.dropPts, divisor, roundName: activeRound.name, isWinner: false }));
+                pointsEntries.push(createPointEntry(prog.player_id, 'PROGNOSIS_PATH', activeRound.dropPts / divisor, realLoserOfThisMatch, prog.phase_id, "KO", mId, mOrder, currentMatch.matchday, { original: activeRound.dropPts, divisor, roundName: activeRound.name, isWinner: false }));
               }
             }
           } else {
             const isChampMatch = (mOrder === 79 || currentMatch.ko_order === 0);
             if (isChampMatch) {
               if (prog.winner_final && realKO.winner_final === prog.winner_final && prog.winner_final === realWinnerOfThisMatch) {
-                pointsEntries.push(createPointEntry(prog.player_id, 'PROGNOSIS_PATH', POINTS_CONFIG.PROG_CHAMPION / divisor, prog.winner_final, prog.phase_id, "KO", mId, mOrder, { original: POINTS_CONFIG.PROG_CHAMPION, divisor }));
+                pointsEntries.push(createPointEntry(prog.player_id, 'PROGNOSIS_PATH', POINTS_CONFIG.PROG_CHAMPION / divisor, prog.winner_final, prog.phase_id, "KO", mId, mOrder, currentMatch.matchday, { original: POINTS_CONFIG.PROG_CHAMPION, divisor }));
               }
               if (prog.loser_final && realKO.loser_final === prog.loser_final && prog.loser_final === realLoserOfThisMatch) {
-                pointsEntries.push(createPointEntry(prog.player_id, 'PROGNOSIS_PATH', POINTS_CONFIG.PROG_VIZE / divisor, prog.loser_final, prog.phase_id, "KO", mId, mOrder, { original: POINTS_CONFIG.PROG_VIZE, divisor }));
+                pointsEntries.push(createPointEntry(prog.player_id, 'PROGNOSIS_PATH', POINTS_CONFIG.PROG_VIZE / divisor, prog.loser_final, prog.phase_id, "KO", mId, mOrder, currentMatch.matchday, { original: POINTS_CONFIG.PROG_VIZE, divisor }));
               }
             } else {
               if (prog.winner_small_final && realKO.winner_small_final === prog.winner_small_final && prog.winner_small_final === realWinnerOfThisMatch) {
-                pointsEntries.push(createPointEntry(prog.player_id, 'PROGNOSIS_PATH', POINTS_CONFIG.PROG_PLACE_3 / divisor, prog.winner_small_final, prog.phase_id, "KO", mId, mOrder, { original: POINTS_CONFIG.PROG_PLACE_3, divisor }));
+                pointsEntries.push(createPointEntry(prog.player_id, 'PROGNOSIS_PATH', POINTS_CONFIG.PROG_PLACE_3 / divisor, prog.winner_small_final, prog.phase_id, "KO", mId, mOrder, currentMatch.matchday, { original: POINTS_CONFIG.PROG_PLACE_3, divisor }));
               }
               if (prog.loser_small_final && realKO.loser_small_final === prog.loser_small_final && prog.loser_small_final === realLoserOfThisMatch) {
-                pointsEntries.push(createPointEntry(prog.player_id, 'PROGNOSIS_PATH', POINTS_CONFIG.PROG_PLACE_4 / divisor, prog.loser_small_final, prog.phase_id, "KO", mId, mOrder, { original: POINTS_CONFIG.PROG_PLACE_4, divisor }));
+                pointsEntries.push(createPointEntry(prog.player_id, 'PROGNOSIS_PATH', POINTS_CONFIG.PROG_PLACE_4 / divisor, prog.loser_small_final, prog.phase_id, "KO", mId, mOrder, currentMatch.matchday, { original: POINTS_CONFIG.PROG_PLACE_4, divisor }));
               }
             }
           }
@@ -373,7 +374,8 @@ export async function processPrognosisPoints(allMatches, currentMatch, forcedGro
 }
 
 // --- ENGINE INNER HELPER: BAUEN DER DB-RECORDS ---
-function createPointEntry(playerId, category, points, team, phase, groupName, matchId, matchOrder, extra = {}) {
+// HIER: matchday als 9. Parameter hinzugefügt, damit er sauber verarbeitet wird!
+function createPointEntry(playerId, category, points, team, phase, groupName, matchId, matchOrder, matchday, extra = {}) {
   let typeLabel = category === "GROUP_RANK" ? "Tabellenplatz" : "Turnier-Pfad";
   let detailDesc = `Erfolgreiche Prognose in Phase ${phase}`;
 
@@ -408,7 +410,8 @@ function createPointEntry(playerId, category, points, team, phase, groupName, ma
     group_name: groupName || "KO", 
     is_prognosis: true,
     match_id: matchId, 
-    match_order: matchOrder, 
+    match_order: matchOrder,
+    matchday: matchday, // Jetzt absolut fehlerfrei befüllt!
     breakdown: { 
       info: `${typeLabel}: ${team}`, 
       descr: detailDesc, 
