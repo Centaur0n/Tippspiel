@@ -44,6 +44,7 @@ const AdminControlCenter = ({ onUpdate }) => {
   const [phases, setPhases] = useState([]);
   const [config, setConfig] = useState(null);
   const [playerProfiles, setPlayerProfiles] = useState({});
+  const [submissions, setSubmissions] = useState([]); // NEU: State für finale User-Abgaben
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -53,24 +54,28 @@ const AdminControlCenter = ({ onUpdate }) => {
   const fetchAdminData = async () => {
     setLoading(true);
     try {
-      const [progRes, phaseRes, configRes, playerRes] = await Promise.all([
+      // Erweiterte Abfrage: Wir holen nun auch die player_phase_submission Tabelle dazu
+      const [progRes, phaseRes, configRes, playerRes, submissionRes] = await Promise.all([
         supabase.from("admin_tip_progress").select("*").order("player_id"),
         supabase.from("tip_phase").select("*").order("id"),
         supabase.from("system_config").select("*").single(),
-        supabase.from("player").select("display_name, name_color, jersey_number, supported_country")
+        supabase.from("player").select("id, display_name, name_color, jersey_number, supported_country"), // id ergänzt für ID-Mapping
+        supabase.from("player_phase_submission").select("*") // NEU: Abgabestatus abholen
       ]);
 
       setProgress(progRes.data || []);
       setPhases(phaseRes.data || []);
       setConfig(configRes.data);
+      setSubmissions(submissionRes.data || []); // NEU: Zuweisung in den State
 
       const profileMap = {};
       if (playerRes.data) {
         playerRes.data.forEach(p => {
           profileMap[p.display_name] = {
+            id: p.id, // NEU: ID mitspeichern, um Abgaben fehlerfrei zu matchen
             color: p.name_color || "#000000",
             jerseyNumber: p.jersey_number || "",
-            supportedCountry: p.supported_country // Reinen Ländernamen speichern für FlagIcon
+            supportedCountry: p.supported_country 
           };
         });
       }
@@ -229,7 +234,7 @@ const AdminControlCenter = ({ onUpdate }) => {
             </thead>
             <tbody>
               {players.map((playerName, index) => {
-                const profile = playerProfiles[playerName] || { color: "#000000", jerseyNumber: "", supportedCountry: "" };
+                const profile = playerProfiles[playerName] || { id: null, color: "#000000", jerseyNumber: "", supportedCountry: "" };
 
                 return (
                   <tr key={playerName} style={{ 
@@ -248,7 +253,6 @@ const AdminControlCenter = ({ onUpdate }) => {
                           }}>
                             {playerName}
                           </span>
-                          {/* FIX: FlagIcon anstelle des fehlerhaften getFlagEmoji Text-Fallbacks */}
                           {profile.supportedCountry && (
                             <FlagIcon teamName={profile.supportedCountry} />
                           )}
@@ -259,8 +263,35 @@ const AdminControlCenter = ({ onUpdate }) => {
                     {/* Status-Zellen */}
                     {phases.map(p => {
                       const stats = progress.find(item => item.display_name === playerName && item.phase_id === p.id);
+                      
+                      // 1. Berechnung: Hat der User alle Felder mathematisch ausgefüllt?
                       const isDone = stats?.tipped_count === stats?.total_matches && stats?.prognosis_count === stats?.total_prognosis;
                       
+                      // 2. Berechnung: Liegt ein finaler Abgabe-Eintrag für diesen Spieler & diese Phase vor?
+                      const currentPlayerId = stats?.player_id || profile.id;
+                      const isSubmitted = submissions.some(sub => sub.player_id === currentPlayerId && sub.phase_id === p.id && sub.is_submitted === true);
+
+                      // DYNAMISCHES STYLING JE NACH STATUS (Abgegeben > Fertig > Offen)
+                      let badgeBg = "#fafafa";
+                      let badgeBorder = "#e2e8f0";
+                      let badgeTextColor = "#64748b";
+                      let statusLabel = "⏳ OFFEN";
+                      let badgeShadow = "none";
+
+                      if (isSubmitted) {
+                        badgeBg = "#f5f3ff";      // Edles Hell-Lila
+                        badgeBorder = "#d8b4fe";  // Lila Rahmen
+                        badgeTextColor = "#6b21a8"; // Dunkellila Text
+                        statusLabel = "🚀 ABGEGEBEN";
+                        badgeShadow = "0 2px 6px rgba(107,33,168,0.06)";
+                      } else if (isDone) {
+                        badgeBg = "#f0fdf4";      // Hellgrün
+                        badgeBorder = "#bbf7d0";
+                        badgeTextColor = "#166534";
+                        statusLabel = "✅ FERTIG";
+                        badgeShadow = "0 2px 6px rgba(34,197,94,0.04)";
+                      }
+
                       return (
                         <td key={p.id} style={{ 
                           padding: "18px 20px", 
@@ -274,12 +305,13 @@ const AdminControlCenter = ({ onUpdate }) => {
                             flexDirection: "column", 
                             alignItems: "center", 
                             gap: "6px",
-                            background: isDone ? "#f0fdf4" : "#fafafa",
+                            background: badgeBg,
                             padding: "10px 16px",
                             borderRadius: "12px",
-                            border: `1px solid ${isDone ? "#bbf7d0" : "#e2e8f0"}`,
-                            minWidth: "100px",
-                            boxShadow: isDone ? "0 2px 6px rgba(34,197,94,0.04)" : "none"
+                            border: `1px solid ${badgeBorder}`,
+                            minWidth: "115px",
+                            boxShadow: badgeShadow,
+                            transition: "all 0.2s ease"
                           }}>
                             <span style={{ fontSize: "13px", fontWeight: "700", color: "#334155" }}>
                               ⚽ {stats?.tipped_count || 0}/{stats?.total_matches || 0}
@@ -296,9 +328,9 @@ const AdminControlCenter = ({ onUpdate }) => {
                               fontWeight: "800",
                               marginTop: "2px",
                               letterSpacing: "0.5px",
-                              color: isDone ? "#166534" : "#64748b"
+                              color: badgeTextColor
                             }}>
-                              {isDone ? "✅ FERTIG" : "⏳ OFFEN"}
+                              {statusLabel}
                             </span>
                           </div>
                         </td>

@@ -29,11 +29,13 @@ const Dashboard = ({ player, onLogout }) => {
   const [loading, setLoading] = useState(true);
   const [isPhase1Locked, setIsPhase1Locked] = useState(false);
   
-  // Neue synchrone Tour States
+  // Einheitliche 0-indizierte Tour-States
   const [tourStep, setTourStep] = useState(0);
   const [tourSubStep, setTourSubStep] = useState(0);
 
-  // Initialer Datencheck beim Laden der Komponente
+  // Bestimmt, ob wir uns exakt im allerersten Teilschritt der Profil-Tour befinden
+  const isFirstProfileStep = tourStep === 1 && tourSubStep === 0;
+
   useEffect(() => {
     fetchDashboardData();
   }, []);
@@ -44,17 +46,16 @@ const Dashboard = ({ player, onLogout }) => {
     }
   }, [activePhase]);
 
-  // DB-Check für das Tutorial
+  // Automatischer Tour-Start bei Erst-Registrierung
   useEffect(() => {
     if (!loading && localPlayer?.id) {
-      // Wenn finished_tutorial in der DB false ist, startet das Tutorial automatisch
-      if (localPlayer.finished_tutorial === false) {
+      if (localPlayer.finished_tutorial === false && tourStep === 0) {
         setTourStep(1);
-        setTourSubStep(1);
-        setActivePhase("profile"); // Direkt auf die erste Tutorial-Seite leiten
+        setTourSubStep(0); // Startet sauber beim ersten Eintrag (Index 0)
+        setActivePhase("profile"); 
       }
     }
-  }, [loading, localPlayer?.finished_tutorial, localPlayer?.id]);
+  }, [loading, localPlayer?.finished_tutorial, localPlayer?.id, tourStep]);
 
   async function fetchDashboardData() {
     if (allPhases.length === 0) setLoading(true);
@@ -98,36 +99,64 @@ const Dashboard = ({ player, onLogout }) => {
     }
   }
 
-  // Hilfsfunktion: Ermittelt die ID der ersten aktiven Tipp-Phase
   const getFirstActivePhaseId = () => {
     const firstActive = allPhases.find(p => p.is_active);
     return firstActive ? firstActive.id : "ranking";
   };
 
-  // Synchroner Tour-Wechsel-Handler gegen den Verschiebungs-Bug
+  // Zurück-Handler für die Tour
+  const handleTourPrev = () => {
+    if (tourSubStep > 0) {
+      setTourSubStep(prev => prev - 1);
+    } else if (tourStep > 1) {
+      const prevStep = tourStep - 1;
+      if (TOUR_STEPS[prevStep]) {
+        const prevStepData = TOUR_STEPS[prevStep];
+        setTourStep(prevStep);
+        setTourSubStep(prevStepData.subSteps.length - 1);
+        
+        let prevPhase = prevStepData.phase;
+        if (prevPhase === "FIRST_ACTIVE_PHASE") {
+          prevPhase = getFirstActivePhaseId();
+        }
+        setActivePhase(prevPhase || "ranking");
+      }
+    }
+  };
+
+  // Korrigierter, absolut ausfallsicherer Next-Handler für 0-Indizierung
   const handleTourNext = async () => {
     const currentStepData = TOUR_STEPS[tourStep];
     const totalSteps = Object.keys(TOUR_STEPS).length;
     
-    // Fall A: Es gibt noch einen Teilschritt im aktuellen Hauptschritt
-    if (tourSubStep < currentStepData.subSteps.length) {
+    if (!currentStepData) {
+      await finishTutorialInDB();
+      return;
+    }
+
+    // Fall A: Es gibt noch Teilschritte im aktuellen Hauptschritt
+    if (tourSubStep < currentStepData.subSteps.length - 1) {
       setTourSubStep(prev => prev + 1);
     } 
     // Fall B: Letzter Teilschritt erreicht -> Wechsel zum nächsten Hauptschritt
     else if (tourStep < totalSteps) {
       const nextStep = tourStep + 1;
-      let nextPhase = TOUR_STEPS[nextStep].phase;
       
-      if (nextPhase === "FIRST_ACTIVE_PHASE") {
-        nextPhase = getFirstActivePhaseId();
-      }
+      if (TOUR_STEPS[nextStep]) {
+        let nextPhase = TOUR_STEPS[nextStep].phase;
+        
+        if (nextPhase === "FIRST_ACTIVE_PHASE") {
+          nextPhase = getFirstActivePhaseId();
+        }
 
-      // Synchroner Zustandswechsel: Erst UI-Phase umschalten, dann Text-IDs anpassen
-      setActivePhase(nextPhase);
-      setTourStep(nextStep);
-      setTourSubStep(1);
+        setActivePhase(nextPhase || "ranking");
+        setTourStep(nextStep);
+        setTourSubStep(0); // Zurücksetzen auf den ersten Teilschritt (Index 0)
+      } else {
+        await finishTutorialInDB();
+      }
     } 
-    // Fall C: Das komplette Tutorial wurde erfolgreich beendet
+    // Fall C: Tutorial beendet
     else {
       await finishTutorialInDB();
     }
@@ -137,7 +166,6 @@ const Dashboard = ({ player, onLogout }) => {
     await finishTutorialInDB();
   };
 
-  // Schreibt den Zustand "true" permanent in die Supabase-DB
   const finishTutorialInDB = async () => {
     try {
       const { error } = await supabase
@@ -156,7 +184,6 @@ const Dashboard = ({ player, onLogout }) => {
     }
   };
 
-  // Reset-Handler für den Button im Profil
   const handleResetTutorial = async () => {
     try {
       const { error } = await supabase
@@ -166,11 +193,10 @@ const Dashboard = ({ player, onLogout }) => {
 
       if (error) throw error;
 
-      // Lokalen Status zurücksetzen & Tour direkt auf Phase 1 abfeuern
       setLocalPlayer(prev => ({ ...prev, finished_tutorial: false }));
       setActivePhase("profile");
       setTourStep(1);
-      setTourSubStep(1);
+      setTourSubStep(0);
     } catch (err) {
       console.error("Fehler beim Zurücksetzen des Tutorials:", err);
     }
@@ -202,30 +228,35 @@ const Dashboard = ({ player, onLogout }) => {
 
   const displayName = localPlayer.display_name && localPlayer.display_name !== "EMPTY" ? localPlayer.display_name : localPlayer.name;
 
-  // Hilfsfunktion zur Ermittlung des Punch-Through Spotlight-Styles im Sidebar-Menü
+  // Scheinwerfer-Effekt für Sidebar-Elemente (Strikt Gold, weißer Hintergrund für Profilbox im ersten Schritt)
   const getSidebarHighlightStyle = (elementId) => {
     const currentStepData = TOUR_STEPS[tourStep];
     if (!currentStepData) return {};
     
-    const currentSubStepData = currentStepData.subSteps[tourSubStep - 1];
+    const currentSubStepData = currentStepData.subSteps[tourSubStep];
     if (currentSubStepData?.id === elementId) {
+      const isProfileBox = elementId === "sidebar_profile";
       return {
         position: "relative",
-        zIndex: 9999, // Bricht glasklar durch das Overlay durch
-        boxShadow: "0 0 0 4px #f59e0b, 0 10px 25px rgba(0,0,0,0.4)",
-        borderRadius: "8px",
-        backgroundColor: "#ffffff",
-        transition: "all 0.2s ease"
+        zIndex: 9999, // Bricht durch jede Abdunklung durch
+        boxShadow: "0 0 0 4px #f59e0b, 0 10px 30px rgba(245, 158, 11, 0.4)", // Reines Gold-Highlight
+        borderRadius: "12px",
+        backgroundColor: isProfileBox ? "#ffffff" : "#1e293b", // Erzwungener weißer Hintergrund im ersten Schritt
+        transition: "all 0.3s ease-in-out"
       };
     }
-    return {};
+    return { transition: "all 0.3s ease-in-out" };
   };
 
   return (
-    <div style={DASHBOARD_STYLES.layout}>
+    <div style={{ ...DASHBOARD_STYLES.layout, overflowX: "hidden" }}>
       
       {/* 🟣 SIDEBAR */}
-      <aside style={DASHBOARD_STYLES.sidebar}>
+      <aside style={{ 
+        ...DASHBOARD_STYLES.sidebar, 
+        position: "relative", 
+        zIndex: isFirstProfileStep ? 9999 : 10 
+      }}>
         
         {/* PROFILE BOX */}
         <div style={{ 
@@ -235,8 +266,8 @@ const Dashboard = ({ player, onLogout }) => {
           gap: "14px", 
           padding: "16px",
           boxSizing: "border-box",
-          border: DASHBOARD_STYLES.profileBox.border,
-          transition: "all 0.3s ease"
+          border: isFirstProfileStep ? "1px solid #f59e0b" : DASHBOARD_STYLES.profileBox.border,
+          ...getSidebarHighlightStyle("sidebar_profile")
         }}>
           <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
@@ -247,7 +278,10 @@ const Dashboard = ({ player, onLogout }) => {
               <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
                 <h2 style={{ 
                   fontSize: "1.15rem", margin: 0, fontWeight: "800",
-                  color: localPlayer.name_color || "#FFFFFF",
+                  // Verhindert unsichtbaren weißen Text auf weißem Highlight-Hintergrund
+                  color: isFirstProfileStep 
+                    ? (localPlayer.name_color === "#FFFFFF" || localPlayer.name_color === "#ffffff" ? "#0f172a" : localPlayer.name_color)
+                    : (localPlayer.name_color || "#FFFFFF"),
                   overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"
                 }}>
                   {displayName}
@@ -261,7 +295,12 @@ const Dashboard = ({ player, onLogout }) => {
                 </span>
               </div>
               
-              <div style={{ fontSize: "0.8rem", color: "rgba(255, 255, 255, 0.6)", fontWeight: "600", marginTop: "4px" }}>
+              <div style={{ 
+                fontSize: "0.8rem", 
+                color: isFirstProfileStep ? "#64748b" : "rgba(255, 255, 255, 0.6)", 
+                fontWeight: "600", 
+                marginTop: "4px" 
+              }}>
                 Trikotnummer: #{localPlayer.jersey_number || "—"}
               </div>
             </div>
@@ -290,7 +329,7 @@ const Dashboard = ({ player, onLogout }) => {
         <nav style={DASHBOARD_STYLES.nav}>
           <button 
             onClick={() => setActivePhase("ranking")} 
-            style={{ ...getTabButtonStyle(activePhase === "ranking"), ...getSidebarHighlightStyle("dashboard_overview") }}
+            style={{ ...getTabButtonStyle(activePhase === "ranking"), ...getSidebarHighlightStyle("sidebar_home") }}
           >
             🏠 Startseite
           </button>
@@ -316,7 +355,7 @@ const Dashboard = ({ player, onLogout }) => {
             onClick={() => setActivePhase("bonus_questions")} 
             style={{
               ...getPhaseButtonStyle(activePhase === "bonus_questions", systemConfig?.current_phase_id === 1),
-              ...getSidebarHighlightStyle("bonus_submit")
+              ...getSidebarHighlightStyle("sidebar_bonus")
             }}
           >
             🏆 Bonusfragen {isPhase1Locked ? " 🔒" : ""}
@@ -340,14 +379,14 @@ const Dashboard = ({ player, onLogout }) => {
           
           <button 
             onClick={() => setActivePhase("points_analysis")} 
-            style={{ ...getTabButtonStyle(activePhase === "points_analysis"), ...getSidebarHighlightStyle("points_table") }}
+            style={{ ...getTabButtonStyle(activePhase === "points_analysis"), ...getSidebarHighlightStyle("sidebar_points") }}
           >
             📊 Punkte-Analyse
           </button>
 
           <button 
             onClick={() => setActivePhase("global_statistics")} 
-            style={{ ...getTabButtonStyle(activePhase === "global_statistics"), ...getSidebarHighlightStyle("stats_tabs") }}
+            style={{ ...getTabButtonStyle(activePhase === "global_statistics"), ...getSidebarHighlightStyle("sidebar_stats") }}
           >
             📈 Statistik-Center
           </button>
@@ -361,11 +400,19 @@ const Dashboard = ({ player, onLogout }) => {
         <button onClick={onLogout} style={DASHBOARD_STYLES.logoutButton}>Abmelden</button>
       </aside>
 
-      {/* 🟢 HAUPTBEREICH */}
-      <main style={DASHBOARD_STYLES.mainContent}>
+      {/* 🟢 HAUPTBEREICH: Erhält dynamischen Blur-Effekt im ersten Teilschritt */}
+      <main style={{ 
+        ...DASHBOARD_STYLES.mainContent, 
+        position: "relative", 
+        zIndex: 1,
+        filter: isFirstProfileStep ? "blur(10px) brightness(0.85)" : "none",
+        pointerEvents: isFirstProfileStep ? "none" : "auto", 
+        transition: "filter 0.4s ease-in-out, transform 0.4s ease-in-out"
+      }}>
         {activePhase === "ranking" ? (
           <>
-            <section style={{ marginBottom: "30px" }}>
+            {/* BUGFIX: Doppeltes style-Attribut zu einem Objekt gemergt */}
+            <section style={{ marginBottom: "30px", ...getSidebarHighlightStyle("dashboard_overview") }}>
               <h3 style={DASHBOARD_STYLES.contentTitle}>Anstehende Partien</h3>
               <div style={DASHBOARD_STYLES.matchGrid}>
                 {nextMatches.map(m => (
@@ -441,7 +488,11 @@ const Dashboard = ({ player, onLogout }) => {
                 onBack={() => setActivePhase("ranking")}
                 tourStep={tourStep}
                 tourSubStep={tourSubStep}
-                onResetTutorial={handleResetTutorial} // Reicht den Reset-Handler an das Profil durch
+                onNext={handleTourNext}
+                onPrev={handleTourPrev}
+                onSkip={handleTourSkip}
+                currentTourData={TOUR_STEPS[tourStep]}
+                onResetTutorial={handleResetTutorial} 
               />
             ) : activePhase === "points_analysis" ? (
               <PointsAnalysisPage userId={localPlayer.id} tourStep={tourStep} tourSubStep={tourSubStep} />
@@ -458,6 +509,10 @@ const Dashboard = ({ player, onLogout }) => {
                 isAdmin={localPlayer.is_admin} 
                 tourStep={tourStep}
                 tourSubStep={tourSubStep}
+                onNext={handleTourNext}
+                onPrev={handleTourPrev}
+                onSkip={handleTourSkip}
+                currentTourData={TOUR_STEPS[tourStep]}
               />
             )}
           </div>
@@ -465,7 +520,7 @@ const Dashboard = ({ player, onLogout }) => {
       </main>
 
       {/* RENDERING DER EXTERNEN TOUR-ENGINE */}
-      {tourStep > 0 && (
+      {tourStep > 0 /*&& (tourStep !== 1 && tourStep !== 2 || tourSubStep === 0) */ &&  (
         <InteractiveTour 
           tourStep={tourStep}
           tourSubStep={tourSubStep}

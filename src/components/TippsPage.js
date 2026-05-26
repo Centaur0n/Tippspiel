@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef, useMemo } from "react";
 import { supabase } from "../supabaseClient";
 import { getBestThirds } from "../Utils/calcTable";
 import { getCountryCode } from '../Utils/teamUtils';
@@ -19,15 +19,17 @@ import KOBracket from './KOBracket';
 import BestThirdsTable from './BestThirdsTable';
 import TipInput from './TipInput';
 
-// Interaktive Tour-Tooltip-Komponente (Zero-Dependency)
 const TourTooltip = ({ step, totalSteps, text, onNext, onPrev, onClose, placement = "top" }) => {
   const isTop = placement === "top";
+  const isLeft = placement === "left";
+
   return (
     <div style={{
       position: "absolute",
-      left: "50%",
-      transform: "translateX(-50%)",
-      ...(isTop ? { bottom: "calc(100% + 16px)" } : { top: "calc(100% + 16px)" }),
+      left: isLeft ? "auto" : "50%",
+      right: isLeft ? "calc(100% + 16px)" : "auto",
+      transform: isLeft ? "none" : "translateX(-50%)",
+      ...(isTop ? { bottom: "calc(100% + 16px)" } : isLeft ? { top: "20%" } : { top: "calc(100% + 16px)" }),
       backgroundColor: "#1e293b",
       color: "white",
       padding: "16px",
@@ -61,68 +63,161 @@ const TourTooltip = ({ step, totalSteps, text, onNext, onPrev, onClose, placemen
           {step === totalSteps - 1 ? "Fertig" : "Weiter"}
         </button>
       </div>
-      {/* Kleiner optischer Hinweis-Pfeil */}
       <div style={{ 
         position: "absolute", 
-        left: "50%", 
-        transform: "translateX(-50%) rotate(45deg)", 
         width: "12px", 
         height: "12px", 
         backgroundColor: "#1e293b",
-        ...(isTop ? { bottom: "-6px" } : { top: "-6px" })
+        transform: "rotate(45deg)",
+        ...(isLeft 
+          ? { right: "-6px", top: "calc(20% + 12px)", left: "auto" } 
+          : { left: "50%", transform: "translateX(-50%) rotate(45deg)", ...(isTop ? { bottom: "-6px" } : { top: "-6px" }) }
+        )
       }} />
     </div>
   );
 };
 
 function TippsPage({ player, phaseId }) {
-  // --- STATES ---
-  const [matches, setMatches] = useState([]);         // Alle Spiele aus der DB
-  const [tips, setTips] = useState({});               // Map der User-Tipps {matchId: tipData}
-  const [manualRanks, setManualRanks] = useState({}); // Manuelle Rang-Korrekturen (z.B. Losentscheid)
-  const [phase, setPhase] = useState(null);           // Infos zur aktuellen Tipp-Phase
-  const [systemConfig, setSystemConfig] = useState(null); // Globale Einstellungen (z.B. Sperre)
-  const [treeHeight, setTreeHeight] = useState(800);  // Dynamische Höhe für den KO-Baum
-  const groupRef = useRef(null);                      // Referenz um Höhe der Gruppenphase zu messen
+  const numericPhaseId = useMemo(() => Number(phaseId), [phaseId]);
 
-  // State für das Onboarding-Tutorial (null = inaktiv)
+  // --- STATES ---
+  const [matches, setMatches] = useState([]);         
+  const [tips, setTips] = useState({});               
+  const [manualRanks, setManualRanks] = useState({}); 
+  const [phase, setPhase] = useState(null);           
+  const [systemConfig, setSystemConfig] = useState(null); 
+  const [isPlayerSubmitted, setIsPlayerSubmitted] = useState(false); // NEU: User-Abgabestatus
+  const [showConfirmModal, setShowConfirmModal] = useState(false);   // NEU: Popup-Sicherheitsabfrage
+  const [treeHeight, setTreeHeight] = useState(800);  
+  const groupRef = useRef(null);                      
+
   const [currentTourIndex, setCurrentTourIndex] = useState(null);
 
   // --- INITIALES LADEN ---
   useEffect(() => {
     if (player?.id && phaseId) {
-      fetchMatches();      // Holt alle Spielansetzungen
-      fetchTips();         // Holt Tipps, Matrix-Tipps und manuelle Ränge des Spielers
-      fetchPhase();        // Prüft Phase (z.B. ob schon abgegeben)
-      fetchSystemConfig(); // Prüft globale Sperren
+      fetchMatches();      
+      fetchTips();         
+      fetchPhase();        
+      fetchSystemConfig(); 
+      fetchPlayerSubmission(); // NEU: Abgabestatus prüfen
     }
   }, [phaseId, player?.id]);
 
-  // Passt die Höhe des KO-Baums an die aktuelle Phase oder die Gruppen-Sidebar an
   useEffect(() => {
-    const currentId = Number(phaseId);
-    if (PHASE_HEIGHTS[currentId]) {
-      setTreeHeight(PHASE_HEIGHTS[currentId]);
-    } else if (currentId === 1 && groupRef.current) {
+    if (PHASE_HEIGHTS[numericPhaseId]) {
+      setTreeHeight(PHASE_HEIGHTS[numericPhaseId]);
+    } else if (numericPhaseId === 1 && groupRef.current) {
       setTreeHeight(groupRef.current.offsetHeight);
     }
-  }, [matches, tips, phaseId]);
+  }, [matches, tips, numericPhaseId]);
 
-  // --- TOUR CONFIGURATION (DYNAMISCH) ---
-  // Erstellt die Tour-Schritte dynamisch basierend darauf, was in der aktuellen Phase sichtbar ist
-  const tourSteps = [
+  // --- MEMOISIERTE DATA-DERIVATIONS ---
+  const grouped = useMemo(() => {
+    const map = {};
+    matches.filter(m => m.stage === "group").forEach(m => {
+      if (!map[m.group_name]) map[m.group_name] = [];
+      map[m.group_name].push(m);
+    });
+    return map;
+  }, [matches]);
+
+  const allGroupsArray = useMemo(() => {
+    return Object.keys(grouped).map(name => ({ 
+      id: name, 
+      teams: calculateFIFADataTable(grouped[name], tips, manualRanks) 
+    }));
+  }, [grouped, tips, manualRanks]);
+
+  const bestThirds = useMemo(() => {
+    return getBestThirds(allGroupsArray, manualRanks);
+  }, [allGroupsArray, manualRanks]);
+
+  const groupResults = useMemo(() => {
+    const res = {};
+    allGroupsArray.forEach(g => { res[g.id] = g.teams.map(t => t.team); });
+    return res;
+  }, [allGroupsArray]);
+
+  const koByRound = useMemo(() => {
+    const map = {};
+    matches.filter(m => m.stage === "ko")
+      .sort((a, b) => a.stage_order - b.stage_order || a.ko_order - b.ko_order)
+      .forEach(m => {
+        if (!map[m.stage_order]) map[m.stage_order] = [];
+        map[m.stage_order].push(m);
+      });
+    return map;
+  }, [matches]);
+
+  const tournamentContext = useMemo(() => ({ 
+    groups: groupResults, 
+    thirdPlaces: bestThirds.slice(0, 8), 
+    tips, 
+    phaseId 
+  }), [groupResults, bestThirds, tips, phaseId]);
+
+  // --- NEU: ABSOLUT FIXE VOLLSTÄNDIGKEITS-ERKENNUNG CLIENTSEITE ---
+  const completionStatus = useMemo(() => {
+    const targets = { 1: { m: 72, p: 32 }, 2: { m: 16, p: 16 }, 3: { m: 8, p: 8 }, 4: { m: 4, p: 4 }, 5: { m: 10, p: 6 } };
+    const currentTarget = targets[numericPhaseId] || { m: 0, p: 0 };
+
+    // Reale Spiele zählen (Tore eingetragen)
+    let matchesCount = Object.keys(tips).filter(key => {
+      if (typeof key === 'string' && key.startsWith('OPT')) return false;
+      return tips[key]?.goals_a !== null && tips[key]?.goals_b !== null;
+    }).length;
+
+    // Für Phase 5 die ausgefüllten Matrizen dazurechnen
+    if (numericPhaseId === 5) {
+      const matrixCount = Object.keys(tips).filter(key => typeof key === 'string' && key.startsWith('OPT') && tips[key]?.goals_a !== null && tips[key]?.goals_b !== null).length;
+      matchesCount += matrixCount;
+    }
+
+    // Prognose-Spiele zählen (Nur Winner eingetragen, Tore leer)
+    const prognosisCount = Object.keys(tips).filter(key => {
+      if (typeof key === 'string' && key.startsWith('OPT')) return false;
+      return tips[key]?.winner !== null && tips[key]?.goals_a === null && tips[key]?.goals_b === null;
+    }).length;
+
+    return {
+      isReady: matchesCount >= currentTarget.m && prognosisCount >= currentTarget.p,
+      currentM: matchesCount,
+      targetM: currentTarget.m,
+      currentP: prognosisCount,
+      targetP: currentTarget.p
+    };
+  }, [tips, numericPhaseId]);
+
+  // --- LOCK DEFINITION ---
+  // Ein User darf nichts mehr ändern, wenn global gesperrt, Phase adminseitig zu, ODER er selbst abgegeben hat!
+  const isReadOnly = phase?.is_submitted || systemConfig?.tips_locked_global || isPlayerSubmitted;
+  const showContent = !systemConfig?.tips_locked_global;
+
+  // --- TOUR CONFIGURATION ---
+  const tourSteps = useMemo(() => [
     { id: 'intro', title: 'Tipp-Zentrale', text: 'Willkommen! Hier gibst du deine Vorhersagen ab. Alle Eingaben werden sofort im Hintergrund gesichert.', placement: 'bottom' },
-    ...(Number(phaseId) === 1 ? [
+    ...(numericPhaseId === 1 ? [
       { id: 'groups', title: 'Gruppenphase', text: 'Trage hier deine Ergebnistipps ein. Die Tabellenstände berechnen und aktualisieren sich vollautomatisch in Echtzeit!', placement: 'bottom' },
       { id: 'thirds', title: 'Beste Gruppendritte', text: 'Diese Sondertabelle filtert die vier besten Gruppendritten heraus, die sich ebenfalls für das Achtelfinale qualifizieren.', placement: 'top' }
     ] : []),
     { id: 'ko', title: 'KO-Phase & Turnierbaum', text: 'Tippe hier den Verlauf der KO-Runden. Steht es nach regulärer Spielzeit unentschieden, kannst du per Klick direkt das Sieger-Team bestimmen.', placement: 'top' },
-    ...(Number(phaseId) === 5 ? [
+    ...(numericPhaseId === 5 ? [
       { id: 'matrix', title: 'Final-Matrix', text: 'In Phase 5 tippst du hier alle mathematisch möglichen Finalkonstellationen parallel, um die Maximalpunkte abzuräumen!', placement: 'left' }
     ] : [])
-  ];
+  ], [numericPhaseId]);
 
   const currentTourStep = currentTourIndex !== null ? tourSteps[currentTourIndex] : null;
+
+  useEffect(() => {
+    if (currentTourIndex !== null && currentTourStep?.id) {
+      const targetElement = document.getElementById(`tour-${currentTourStep.id}`);
+      if (targetElement) {
+        targetElement.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+      }
+    }
+  }, [currentTourIndex, currentTourStep]);
 
   const handleTourNext = () => {
     if (currentTourIndex === tourSteps.length - 1) {
@@ -136,22 +231,23 @@ function TippsPage({ player, phaseId }) {
     if (currentTourIndex > 0) setCurrentTourIndex(prev => prev - 1);
   };
 
-  // Hilfsfunktion zur Zuweisung von Highlight-Rahmen während der aktiven Tour
   const getTourStyle = (stepId) => {
-    if (currentTourStep?.id === stepId) {
-      return {
+    const isActive = currentTourStep?.id === stepId;
+    return {
+      transition: "all 0.3s ease-in-out",
+      position: "relative",
+      ...(isActive && {
         outline: "3px solid #2563eb",
-        outlineOffset: "4px",
-        borderRadius: "8px",
-        boxShadow: "0 0 20px rgba(37, 99, 235, 0.2)",
-        transition: "all 0.2s ease-in-out",
-        position: "relative"
-      };
-    }
-    return { transition: "all 0.2s ease-in-out", position: "relative" };
+        outlineOffset: "6px",
+        borderRadius: "12px",
+        boxShadow: "0 0 25px rgba(37, 99, 235, 0.35)",
+        backgroundColor: "rgba(37, 99, 235, 0.02)",
+        zIndex: 10
+      })
+    };
   };
 
-  // --- API CALLS (DB INTERAKTION) ---
+  // --- API CALLS ---
   async function fetchMatches() {
     const { data } = await supabase.from("match").select("*");
     setMatches(data || []);
@@ -160,8 +256,9 @@ function TippsPage({ player, phaseId }) {
   async function fetchTips() {
     if (!player?.id || !phaseId) return;
     const { data: normalData } = await supabase.from("tip").select("*").eq("player_id", player.id).eq("phase_id", phaseId);
+    
     let matrixData = [];
-    if (Number(phaseId) === 5) {
+    if (numericPhaseId === 5) {
       const { data } = await supabase.from("tip_final_matrix").select("*").eq("player_id", player.id);
       if (data) matrixData = data;
     }
@@ -188,8 +285,34 @@ function TippsPage({ player, phaseId }) {
     setSystemConfig(data);
   }
 
-  const isReadOnly = phase?.is_submitted || systemConfig?.tips_locked_global;
-  const showContent = !systemConfig?.tips_locked_global;
+  async function fetchPlayerSubmission() {
+    if (!player?.id || !phaseId) return;
+    const { data } = await supabase.from("player_phase_submission")
+      .select("is_submitted")
+      .eq("player_id", player.id)
+      .eq("phase_id", phaseId)
+      .single();
+    if (data) setIsPlayerSubmitted(data.is_submitted);
+  }
+
+  // Finales Abspeichern der Abgabe durch den User
+  async function submitTipsFinal() {
+    if (!completionStatus.isReady || isReadOnly) return;
+    
+    const { error } = await supabase.from("player_phase_submission").upsert([{
+      player_id: player.id,
+      phase_id: phaseId,
+      is_submitted: true,
+      submitted_at: new Date().toISOString()
+    }], { onConflict: 'player_id, phase_id' });
+
+    if (!error) {
+      setIsPlayerSubmitted(true);
+      setShowConfirmModal(false);
+    } else {
+      console.error("Fehler bei der Finalabgabe:", error.message);
+    }
+  }
 
   const getWinner = (matchId, currentTips) => {
     const tip = currentTips[matchId];
@@ -212,12 +335,14 @@ function TippsPage({ player, phaseId }) {
     if (!match) return "?";
     const tip = tips[match.id];
     if (!tip || !tip.winner) return "?";
-    return tip.winner === "1" ? (type === "SH" ? match.team_a : match.team_b) : (type === "SH" ? match.team_b : match.team_a);
+    return tip.winner === "1" 
+      ? (type === "SH" ? match.team_a : match.team_b) 
+      : (type === "SH" ? match.team_b : match.team_a);
   };
 
-  // --- SPEICHER-AKTIONEN (USER EINGABE) ---
+  // --- SPEICHER-AKTIONEN (JETZT KORREKT GEGUARDED GEGEN LOCKS) ---
   async function saveTip(matchId, goalsA, goalsB, winner) {
-    if (phase?.is_submitted) return;
+    if (isReadOnly) return; // FIX: Verhindert jegliche Eingabe bei gesperrter Phase/Abgabe!
     const gA = (goalsA !== null && goalsA !== "") ? Number(goalsA) : null;
     const gB = (goalsB !== null && goalsB !== "") ? Number(goalsB) : null;
     
@@ -233,10 +358,11 @@ function TippsPage({ player, phaseId }) {
                         (!winner);
 
     if (isInputEmpty) {
-      await supabase.from("tip").delete()
-        .eq("player_id", player.id)
-        .eq("match_id", matchId)
-        .eq("phase_id", phaseId);
+      if (isSpecial) {
+        await supabase.from("tip_final_matrix").delete().eq("player_id", player.id).eq("matrix_key", matchId);
+      } else {
+        await supabase.from("tip").delete().eq("player_id", player.id).eq("match_id", matchId).eq("phase_id", phaseId);
+      }
         
       setTips(prev => {
         const next = { ...prev };
@@ -273,9 +399,11 @@ function TippsPage({ player, phaseId }) {
     const groupMatches = matches.filter(m => m.group_name === groupName);
     const matchIds = groupMatches.map(m => m.id);
     const teamsInGroup = [...new Set(groupMatches.flatMap(m => [m.team_a, m.team_b]))];
+    
     await supabase.from("tip").delete().eq("player_id", player.id).in("match_id", matchIds);
     await supabase.from("tip_manual_rank").delete().eq("player_id", player.id).eq("phase_id", phaseId).in("team_name", teamsInGroup);
     await supabase.from("user_points_detail").delete().eq("player_id", player.id).in("match_id", matchIds);
+    
     await deleteKORound(1, phaseId);
     fetchTips(); 
   }
@@ -297,35 +425,16 @@ function TippsPage({ player, phaseId }) {
     fetchTips();
   }
 
-  // --- VORBEREITUNG DER DATEN (UI-BERECHNUNG) ---
-  const grouped = {};
-  matches.filter(m => m.stage === "group").forEach(m => {
-    if (!grouped[m.group_name]) grouped[m.group_name] = [];
-    grouped[m.group_name].push(m);
-  });
-
-  const allGroupsArray = Object.keys(grouped).map(name => ({ id: name, teams: calculateFIFADataTable(grouped[name], tips, manualRanks) }));
-  const bestThirds = getBestThirds(allGroupsArray, manualRanks);
-  const groupResults = {};
-  allGroupsArray.forEach(g => { groupResults[g.id] = g.teams.map(t => t.team); });
-
-  const koByRound = {};
-  matches.filter(m => m.stage === "ko").sort((a,b) => a.stage_order - b.stage_order || a.ko_order - b.ko_order).forEach(m => {
-    if (!koByRound[m.stage_order]) koByRound[m.stage_order] = [];
-    koByRound[m.stage_order].push(m);
-  });
-
-  const tournamentContext = { groups: groupResults, thirdPlaces: bestThirds.slice(0, 8), tips, phaseId };
   const currentSpacing = phase ? (PHASE_SPACING[phase.id] || 70) : 70;
   const startIdxOfPhase = phase ? (phase.id <= 2 ? 0 : phase.id - 2) : 0;
   const topOffset = getTopPosition(startIdxOfPhase, 0, treeHeight, currentSpacing);
 
-  // --- DB UPDATER (DEBOUNCED PROGNOSE) ---
+  // --- DB UPDATER FOR PROGNOSIS ---
   useEffect(() => {
-    if (!player?.id || matches.length === 0 || phase?.is_submitted) return;
+    if (!player?.id || matches.length === 0 || isReadOnly) return; // FIX: Schreibt nichts mehr in DB wenn gesperrt
 
     const handler = setTimeout(async () => {
-      if (Number(phaseId) === 1 && allGroupsArray.length > 0) {
+      if (numericPhaseId === 1 && allGroupsArray.length > 0) {
         const top8Thirds = bestThirds.slice(0, 8).map(t => t.team);
         await updateGroupPrognosisDB(player.id, allGroupsArray, top8Thirds);
       }
@@ -336,7 +445,7 @@ function TippsPage({ player, phaseId }) {
     }, 500);
 
     return () => clearTimeout(handler);
-  }, [tips, phaseId, player?.id, allGroupsArray, bestThirds, koByRound]);
+  }, [tips, phaseId, player?.id, allGroupsArray, bestThirds, koByRound, numericPhaseId, tournamentContext, isReadOnly]);
 
   // --- RENDER-HELPER ---
   const renderMatrixTeamRow = (teamName, side, isFirst, winningSide) => {
@@ -363,6 +472,7 @@ function TippsPage({ player, phaseId }) {
     const h2 = koByRound[4]?.[1];
     if (!h1 || !h2) return null;
     const semiFinalsComplete = tips[h1.id] && tips[h2.id];
+    
     const options = [
       { id: 2, fA: getWLphase5(h1, "SH"), fB: getWLphase5(h2, "VH"), sA: getWLphase5(h1, "VH"), sB: getWLphase5(h2, "SH") },
       { id: 3, fA: getWLphase5(h1, "VH"), fB: getWLphase5(h2, "SH"), sA: getWLphase5(h1, "SH"), sB: getWLphase5(h2, "VH") },
@@ -370,7 +480,7 @@ function TippsPage({ player, phaseId }) {
     ];
 
     return (
-      <div style={{ ...getTourStyle('matrix'), display: "flex", gap: "30px", marginLeft: "40px" }}>
+      <div id="tour-matrix" style={{ ...getTourStyle('matrix'), display: "flex", gap: "30px", marginLeft: "40px", padding: "10px" }}>
         {options.map(opt => {
           const tipF = tips[`OPT${opt.id}_F`];
           const tipS3 = tips[`OPT${opt.id}_S3`];
@@ -417,12 +527,10 @@ function TippsPage({ player, phaseId }) {
     );
   };
 
-  // --- DB UPDATER FUNKTIONEN (INTERNAL) ---
   async function updateGroupPrognosisDB(playerId, groupsArr, bestThirdsTeams) {
     const records = groupsArr.map(g => {
       const groupFourth = g.teams[3]?.team;
       const groupThird = g.teams[2]?.team;
-
       let finalDroppedOut = [groupFourth].filter(Boolean);
       if (groupThird && !bestThirdsTeams.includes(groupThird)) {
         finalDroppedOut.push(groupThird);
@@ -430,25 +538,18 @@ function TippsPage({ player, phaseId }) {
       const isThirdOfThisGroupInTop8 = groupThird && bestThirdsTeams.includes(groupThird);
 
       return {
-        player_id: playerId, 
-        group_name: g.id,
-        rank_1: g.teams[0]?.team || null, 
-        rank_2: g.teams[1]?.team || null,
-        rank_3: g.teams[2]?.team || null, 
-        rank_4: g.teams[3]?.team || null,
+        player_id: playerId, group_name: g.id,
+        rank_1: g.teams[0]?.team || null, rank_2: g.teams[1]?.team || null,
+        rank_3: g.teams[2]?.team || null, rank_4: g.teams[3]?.team || null,
         reached_ko: [g.teams[0]?.team, g.teams[1]?.team].filter(Boolean),
-        reached_ko_best_thirds: isThirdOfThisGroupInTop8 ? [groupThird] : [], 
-        dropped_out: finalDroppedOut
+        reached_ko_best_thirds: isThirdOfThisGroupInTop8 ? [groupThird] : [], dropped_out: finalDroppedOut
       };
     });
-
-    const { error } = await supabase.from("user_prognosis_group").upsert(records, { onConflict: 'player_id, group_name' });
-    if (error) console.error("Fehler user_prognosis_group:", error.message);
+    await supabase.from("user_prognosis_group").upsert(records, { onConflict: 'player_id, group_name' });
   }
 
   async function updateKOPrognosisDB(playerId, phId, koData, currentTips, context) {
     const currentId = Number(phId);
-
     const getTeamForPrognosis = (roundIdx, matchIdx, side) => {
       if (currentId === 1 && roundIdx === 0) {
         const slot = KO_STRUCTURE.round16[matchIdx][side === "A" ? 0 : 1];
@@ -460,36 +561,26 @@ function TippsPage({ player, phaseId }) {
 
     const getProgWinner = (roundIdx, matchIdx) => {
       const stageOrder = roundIdx + 1;
-      const matchesInRound = koData[stageOrder] || [];
-      const m = matchesInRound[matchIdx];
+      const m = (koData[stageOrder] || [])[matchIdx];
       if (!m) return null;
       const winSide = getWinner(m.id, currentTips);
-      if (!winSide) return null;
-      return getTeamForPrognosis(roundIdx, matchIdx, winSide === 1 ? "A" : "B");
+      return winSide ? getTeamForPrognosis(roundIdx, matchIdx, winSide === 1 ? "A" : "B") : null;
     };
 
     const getProgLoser = (roundIdx, matchIdx) => {
       const stageOrder = roundIdx + 1;
-      const matchesInRound = koData[stageOrder] || [];
-      const m = matchesInRound[matchIdx];
+      const m = (koData[stageOrder] || [])[matchIdx];
       if (!m) return null;
       const winSide = getWinner(m.id, currentTips);
-      if (!winSide) return null;
-      return getTeamForPrognosis(roundIdx, matchIdx, winSide === 1 ? "B" : "A");
+      return winSide ? getTeamForPrognosis(roundIdx, matchIdx, winSide === 1 ? "B" : "A") : null;
     };
 
     const getSortedMatches = (stage) => (koData[stage] || []).sort((a, b) => a.ko_order - b.ko_order);
-
-    const r16 = getSortedMatches(1); 
-    const r8  = getSortedMatches(2); 
-    const r4  = getSortedMatches(3); 
-    const r2  = getSortedMatches(4); 
+    const r16 = getSortedMatches(1); const r8 = getSortedMatches(2); const r4 = getSortedMatches(3); const r2 = getSortedMatches(4);
     const r3placeMatch = koData[5]?.[1];
 
-    // Logik-Korrektur: Duplizierte Keys (reached_2 & drop_out_4) sicher zusammengefasst
     const finalRecord = {
-      player_id: playerId, 
-      phase_id: currentId,
+      player_id: playerId, phase_id: currentId,
       reached_16: (currentId >= 2) ? [] : r16.flatMap((_, i) => [getTeamForPrognosis(0, i, "A"), getTeamForPrognosis(0, i, "B")]).filter(Boolean),
       reached_8:  (currentId >= 3) ? [] : r8.flatMap((_, i) => [getTeamForPrognosis(1, i, "A"), getTeamForPrognosis(1, i, "B")]).filter(Boolean),
       reached_4:  (currentId >= 4) ? [] : r4.flatMap((_, i) => [getTeamForPrognosis(2, i, "A"), getTeamForPrognosis(2, i, "B")]).filter(Boolean),
@@ -504,94 +595,104 @@ function TippsPage({ player, phaseId }) {
       loser_small_final:  r3placeMatch ? getProgLoser(4, 1) : null
     };
 
-    const { error } = await supabase.from("user_prognosis_ko").upsert([finalRecord], { onConflict: 'player_id, phase_id' });
-    if (error) console.error(`DB-Fehler Phase ${currentId}:`, error.message);
+    await supabase.from("user_prognosis_ko").upsert([finalRecord], { onConflict: 'player_id, phase_id' });
   }
 
-  // --- HAUPT-RENDER-METHODE ---
   if (!player || !phaseId) return <div style={{ padding: "20px" }}>Lade Benutzerdaten...</div>;
 
   return (
-    <div style={{ padding: "20px", width: "100%", overflowX: "auto" }}>
+    <div style={{ padding: "20px", width: "100%", overflowX: "auto", position: "relative" }}>
       
-      {/* Obere Navigations- und Tourleiste */}
+      {/* OBERE NAVIGATIONS- UND SEITENLEISTE */}
       {showContent && (
-        <div style={{ ...getTourStyle('intro'), display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px", padding: "0 10px" }}>
+        <div id="tour-intro" style={{ ...getTourStyle('intro'), display: "flex", justifyContent: "flex-start", alignItems: "center", marginBottom: "20px", padding: "10px", backgroundColor: "#f8fafc", borderRadius: "12px", border: "1px solid #e2e8f0" }}>
           <div>
-            <h2 style={{ margin: 0 }}>Tippabgabe – Phase {phaseId}</h2>
+            <h2 style={{ margin: 0, color: "#0f172a", marginRight: "30px" }}>Tippabgabe – Phase {phaseId}</h2>
           </div>
-          <button 
-            onClick={() => setCurrentTourIndex(0)}
-            style={{
-              padding: "8px 16px", borderRadius: "8px", border: "1px solid #cbd5e1",
-              backgroundColor: "white", color: "#475569", cursor: "pointer",
-              fontWeight: "600", fontSize: "13px", display: "flex", alignItems: "center", gap: "6px"
-            }}
-            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#f8fafc")}
-            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "white")}
-          >
-            Anleitung anzeigen 🚀
-          </button>
+          
+          {/* RECHTS NEBEN DER ÜBERSCHRIFT: DYNAMISCHER STATUS- / ABGABEBUTTON */}
+          <div style={{ display: "flex", alignItems: "center", gap: "32px" }}>
+            {isPlayerSubmitted ? (
+              <div style={{ padding: "8px 16px", borderRadius: "8px", backgroundColor: "#dcfce7", color: "#15803d", fontWeight: "700", fontSize: "14px", border: "1px solid #bbf7d0" }}>
+                ✓ Tipps erfolgreich abgegeben
+              </div>
+            ) : phase?.is_submitted || systemConfig?.tips_locked_global ? (
+              <div style={{ padding: "8px 16px", borderRadius: "8px", backgroundColor: "#fee2e2", color: "#b91c1c", fontWeight: "700", fontSize: "14px", border: "1px solid #fca5a5" }}>
+                🔒 Phase gesperrt
+              </div>
+            ) : !completionStatus.isReady ? (
+              <div style={{ color: "#dc2626", fontWeight: "600", fontSize: "13px", padding: "8px 12px", border: "1px dashed #fca5a5", borderRadius: "8px", backgroundColor: "#fff5f5" }}>
+                ❌ Noch nicht alle Tipps wurden eingegeben ({completionStatus.currentM}/{completionStatus.targetM} Gruppenspiele & {completionStatus.currentP}/{completionStatus.targetP} Prognosen)
+              </div>
+            ) : (
+              <button 
+                onClick={() => setShowConfirmModal(true)}
+                style={{ padding: "10px 20px", borderRadius: "8px", border: "none", backgroundColor: "#22c55e", color: "white", cursor: "pointer", fontWeight: "700", fontSize: "14px", boxShadow: "0 4px 6px -1px rgba(34, 197, 94, 0.2)", transition: "transform 0.1s" }}
+                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#16a34a")}
+                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#22c55e")}
+              >
+                🚀 Tipps final abgeben
+              </button>
+            )}
+
+            <button 
+              onClick={() => setCurrentTourIndex(0)}
+              style={{ padding: "8px 16px", borderRadius: "8px", border: "1px solid #cbd5e1", backgroundColor: "white", color: "#475569", cursor: "pointer", fontWeight: "600", fontSize: "13px" }}
+            >
+              Anleitung anzeigen 🚀
+            </button>
+          </div>
+
           {currentTourStep?.id === 'intro' && (
-            <TourTooltip 
-              step={currentTourIndex} totalSteps={tourSteps.length} text={currentTourStep.text} placement={currentTourStep.placement}
-              onNext={handleTourNext} onPrev={handleTourPrev} onClose={() => setCurrentTourIndex(null)}
-            />
+            <TourTooltip step={currentTourIndex} totalSteps={tourSteps.length} text={currentTourStep.text} placement={currentTourStep.placement} onNext={handleTourNext} onPrev={handleTourPrev} onClose={() => setCurrentTourIndex(null)} />
           )}
         </div>
       )}
 
       {showContent ? (
         <div style={{ display: "flex", flexDirection: "row", gap: "40px", alignItems: "flex-start" }}>
-          
-          {/* GRUPPENPHASE (Linke Seite, nur Phase 1) */}
-          {Number(phaseId) === 1 && (
+          {numericPhaseId === 1 && (
             <div style={{ flexShrink: 0, width: "fit-content" }}>
               <div ref={groupRef}>
-                <div style={getTourStyle('groups')}>
+                <div id="tour-groups" style={{ ...getTourStyle('groups'), padding: "10px", marginBottom: "20px" }}>
                   <h3>Gruppenphase</h3>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: "30px", marginBottom: "40px", maxWidth: "1100px" }}>
                     {Object.keys(grouped).sort().map(name => (
                       <div key={name} style={{ position: 'relative' }}>
-                        <GroupTable groupName={name} matches={grouped[name]} tips={tips} tableData={allGroupsArray.find(g => g.id === name).teams} onSaveTip={saveTip} isSubmitted={isReadOnly} manualRanks={manualRanks} onSaveManualRank={saveManualRank} onDeleteTips={isReadOnly ? null : resetGroup} />
+                        <GroupTable 
+                          groupName={name} matches={grouped[name]} tips={tips} 
+                          tableData={allGroupsArray.find(g => g.id === name)?.teams || []} 
+                          onSaveTip={saveTip} isSubmitted={isReadOnly} manualRanks={manualRanks} 
+                          onSaveManualRank={saveManualRank} onDeleteTips={isReadOnly ? null : resetGroup} 
+                        />
                       </div>
                     ))}
                   </div>
                   {currentTourStep?.id === 'groups' && (
-                    <TourTooltip 
-                      step={currentTourIndex} totalSteps={tourSteps.length} text={currentTourStep.text} placement={currentTourStep.placement}
-                      onNext={handleTourNext} onPrev={handleTourPrev} onClose={() => setCurrentTourIndex(null)}
-                    />
+                    <TourTooltip step={currentTourIndex} totalSteps={tourSteps.length} text={currentTourStep.text} placement={currentTourStep.placement} onNext={handleTourNext} onPrev={handleTourPrev} onClose={() => setCurrentTourIndex(null)} />
                   )}
                 </div>
 
-                <div style={getTourStyle('thirds')}>
+                <div id="tour-thirds" style={{ ...getTourStyle('thirds'), padding: "10px" }}>
                   <BestThirdsTable teams={bestThirds} manualRanks={manualRanks} onSaveManualRank={saveManualRank} isSubmitted={isReadOnly} />
                   {currentTourStep?.id === 'thirds' && (
-                    <TourTooltip 
-                      step={currentTourIndex} totalSteps={tourSteps.length} text={currentTourStep.text} placement={currentTourStep.placement}
-                      onNext={handleTourNext} onPrev={handleTourPrev} onClose={() => setCurrentTourIndex(null)}
-                    />
+                    <TourTooltip step={currentTourIndex} totalSteps={tourSteps.length} text={currentTourStep.text} placement={currentTourStep.placement} onNext={handleTourNext} onPrev={handleTourPrev} onClose={() => setCurrentTourIndex(null)} />
                   )}
                 </div>
               </div>
             </div>
           )}
 
-          {/* KO-PHASE & BAUM (Rechte Seite / Hauptinhalt) */}
           <div style={{ flexGrow: 1 }}>
-            <div style={getTourStyle('ko')}>
+            <div id="tour-ko" style={{ ...getTourStyle('ko'), padding: "10px" }}>
               <h3 style={{ marginLeft: "20px" }}>KO-Phase</h3>
               <div style={{ display: "flex", flexDirection: "row", alignItems: "flex-start" }}>
                 <KOBracket 
-                  koByRound={koByRound} 
-                  tips={tips} 
-                  treeHeight={treeHeight} 
-                  roundNames={ROUND_NAMES} 
+                  koByRound={koByRound} tips={tips} treeHeight={treeHeight} roundNames={ROUND_NAMES} 
                   phase={{ ...phase, is_submitted: isReadOnly }} 
                   getTopPosition={(rIdx, mIdx) => getTopPosition(rIdx, mIdx, treeHeight, currentSpacing) - topOffset} 
                   getTeamFromPrevious={(rIdx, mIdx, side) => {
-                    if (Number(phaseId) === 1 && rIdx === 0) {
+                    if (numericPhaseId === 1 && rIdx === 0) {
                       const matchPair = KO_STRUCTURE.round16[mIdx];
                       const slot = side === "A" ? matchPair[0] : matchPair[1];
                       return resolveSlot(slot, tournamentContext) || null;
@@ -599,24 +700,46 @@ function TippsPage({ player, phaseId }) {
                     return getTeamFromPrevious(rIdx, mIdx, side, koByRound, tips, tournamentContext);
                   }}
                   resolveSlot={(slot) => resolveSlot(slot, tournamentContext)} 
-                  saveTip={isReadOnly ? null : saveTip} 
-                  deleteKORound={isReadOnly ? null : deleteKORound} 
-                  KO_STRUCTURE={KO_STRUCTURE} 
-                  isAdmin={false} 
+                  saveTip={isReadOnly ? null : saveTip} deleteKORound={isReadOnly ? null : deleteKORound} 
+                  KO_STRUCTURE={KO_STRUCTURE} isAdmin={false} 
                 />
-                {Number(phaseId) === 5 && renderPhase5Matrix()}
+                {numericPhaseId === 5 && renderPhase5Matrix()}
               </div>
               {currentTourStep?.id === 'ko' && (
-                <TourTooltip 
-                  step={currentTourIndex} totalSteps={tourSteps.length} text={currentTourStep.text} placement={currentTourStep.placement}
-                  onNext={handleTourNext} onPrev={handleTourPrev} onClose={() => setCurrentTourIndex(null)}
-                />
+                <TourTooltip step={currentTourIndex} totalSteps={tourSteps.length} text={currentTourStep.text} placement={currentTourStep.placement} onNext={handleTourNext} onPrev={handleTourPrev} onClose={() => setCurrentTourIndex(null)} />
               )}
             </div>
           </div>
-
         </div>
       ) : <div style={{ padding: "100px", textAlign: "center", color: "#94a3b8" }}>Die Tippabgabe ist aktuell gesperrt.</div>}
+
+      {/* MODALES POPUP FÜR DIE SICHERHEITSABFRAGE */}
+      {showConfirmModal && (
+        <div style={{ position: "fixed", top: 0, left: 0, width: "100vw", height: "100vh", backgroundColor: "rgba(15, 23, 42, 0.6)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 10000, backdropFilter: "blur(4px)" }}>
+          <div style={{ backgroundColor: "white", padding: "30px", borderRadius: "16px", boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)", width: "420px", textAlign: "center" }}>
+            <div style={{ fontSize: "40px", marginBottom: "12px" }}>🚀</div>
+            <h3 style={{ margin: "0 0 10px 0", color: "#0f172a", fontSize: "18px", fontWeight: "700" }}>Tipps final abgeben?</h3>
+            <p style={{ margin: "0 0 24px 0", color: "#475569", fontSize: "14px", lineHeight: "1.5" }}>
+              Bist du dir absolut sicher? Nach der Abgabe kannst du deine Tipps für diese Phase **nicht mehr ändern**.
+            </p>
+            <div style={{ display: "flex", gap: "12px", justifyContent: "center" }}>
+              <button 
+                onClick={() => setShowConfirmModal(false)}
+                style={{ padding: "10px 18px", borderRadius: "8px", border: "1px solid #cbd5e1", backgroundColor: "white", color: "#475569", cursor: "pointer", fontWeight: "600", fontSize: "13px" }}
+              >
+                Abbrechen
+              </button>
+              <button 
+                onClick={submitTipsFinal}
+                style={{ padding: "10px 18px", borderRadius: "8px", border: "none", backgroundColor: "#22c55e", color: "white", cursor: "pointer", fontWeight: "600", fontSize: "13px" }}
+              >
+                Ja, jetzt abgeben
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
