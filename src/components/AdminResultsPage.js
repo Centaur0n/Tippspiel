@@ -4,10 +4,10 @@ import { getTopPosition, resolveSlot, getTeamFromPrevious } from "../logic/koLog
 import { getBestThirds } from "../Utils/calcTable";
 import { syncRealTournamentState } from "../logic/realStateSync";
 
-// LOGIK-FUNKTIONEN: getPhaseIdFromMatch hier importiert!
+// LOGIK-FUNKTIONEN
 import { calculateFIFADataTable, getPhaseIdFromMatch } from "../logic/tournamentLogic"; 
 
-// POINTS-ENGINE: Für die Punkte-Gutschriften
+// POINTS-ENGINE
 import { 
   processStandardMatchTips, 
   processPrognosisPoints, 
@@ -36,10 +36,25 @@ function AdminResultsPage({ phaseId, onUpdate }) {
   const [loading, setLoading] = useState(true);
   const [manualRanks, setManualRanks] = useState({}); 
   const groupRef = useRef(null);
+  
+  // HIER NEU: Referenz für den KO-Baum-Container, um die kleinen Knöpfe gezielt zu greifen
+  const koBracketRef = useRef(null);
 
   useEffect(() => {
     fetchData();
   }, [phaseId]);
+
+  // HIER NEU: Dieser Effekt wirft die kleinen Reset-Buttons hochkant raus, sobald fertig geladen ist
+  useEffect(() => {
+    if (!loading && koBracketRef.current) {
+      const buttons = koBracketRef.current.querySelectorAll("button");
+      buttons.forEach(btn => {
+        if (btn.textContent.trim() === "Reset") {
+          btn.style.display = "none";
+        }
+      });
+    }
+  }, [matches, loading]);
 
   async function fetchData() {
     setLoading(true);
@@ -110,7 +125,6 @@ function AdminResultsPage({ phaseId, onUpdate }) {
     const currentMatchBefore = matches.find(m => m.id === matchId);
     if (currentMatchBefore?.stage === "group") await resetManualRanksForGroup(currentMatchBefore.group_name);
 
-    // 1. Ergebnis im Spiel speichern
     await supabase.from("match").update({ goals_a_real: gA, goals_b_real: gB, winner_real: finalWinner }).eq("id", matchId);
     
     const { data: allMatches } = await supabase.from("match").select("*").order("match_order");
@@ -119,17 +133,12 @@ function AdminResultsPage({ phaseId, onUpdate }) {
     const { data: refreshedMatches } = await supabase.from("match").select("*").order("match_order");
     const dynamicCurrentMatch = refreshedMatches.find(m => m.id === matchId);
 
-    // 2. DYNAMISCHE PHASEN-ERMITTLUNG: Nutzt jetzt die FIFA-Logik-Funktion
     const targetPhase = getPhaseIdFromMatch(dynamicCurrentMatch);
 
     if (!isReset && dynamicCurrentMatch) {
-      // CHEF-AUFRUF: Berechnet alle Standard-Tipps über die pointsEngine unter der korrekten Phase
       await processStandardMatchTips(dynamicCurrentMatch, targetPhase);
-      
-      // CHEF-AUFRUF: Berechnet die Turnierpfad-Prognosen
       await processPrognosisPoints(refreshedMatches, dynamicCurrentMatch, dynamicCurrentMatch.stage === "ko" ? null : dynamicCurrentMatch.group_name, false);
     } else {
-      // Falls das Ergebnis gelöscht wurde (Reset), putzen wir die alten Punkte weg
       await supabase.from("user_points_detail").delete().eq("match_id", matchId).eq("is_prognosis", false);
     }
 
@@ -172,7 +181,7 @@ function AdminResultsPage({ phaseId, onUpdate }) {
       </div>
 
       <div style={{ flex: "1", minWidth: "600px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "24px", marginBottom: "20px" }}>
             <h2 style={{ color: "#dc2626", margin: 0 }}>Admin: KO-Baum</h2>
             <button 
               onClick={forceHardResetKO} 
@@ -181,14 +190,21 @@ function AdminResultsPage({ phaseId, onUpdate }) {
               KO-Baum Reset
             </button>
         </div>
-        <KOBracket 
-          koByRound={koByRound} tips={realResultsAsTips} treeHeight={TREE_HEIGHT} roundNames={ROUND_NAMES}
-          phase={{ id: phaseId }} 
-          getTopPosition={(r, m) => getTopPosition(r, m, TREE_HEIGHT, 300)}
-          getTeamFromPrevious={(r, m, s) => getTeamFromPrevious(r, m, s, koByRound, realResultsAsTips, tournamentContext)}
-          resolveSlot={(slot) => resolveSlot(slot, tournamentContext)}
-          saveTip={saveRealResult} deleteKORound={() => {}} isAdmin={true} KO_STRUCTURE={KO_STRUCTURE}
-        />
+        
+        {/* HIER GEÄNDERT: ref={koBracketRef} hinzugefügt */}
+        <div ref={koBracketRef}>
+          <KOBracket 
+            koByRound={koByRound} tips={realResultsAsTips} treeHeight={TREE_HEIGHT} roundNames={ROUND_NAMES}
+            phase={{ id: phaseId }} 
+            getTopPosition={(r, m) => getTopPosition(r, m, TREE_HEIGHT, 300)}
+            getTeamFromPrevious={(r, m, s) => getTeamFromPrevious(r, m, s, koByRound, realResultsAsTips, tournamentContext)}
+            resolveSlot={(slot) => resolveSlot(slot, tournamentContext)}
+            saveTip={saveRealResult} 
+            deleteKORound={() => {}} 
+            isAdmin={true} 
+            KO_STRUCTURE={KO_STRUCTURE}
+          />
+        </div>
       </div>
     </div>
   );

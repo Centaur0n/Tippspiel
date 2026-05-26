@@ -5,11 +5,9 @@
  */
 
 /**
- * ERMITTELT DIE PHASE_ID EINES SPIELS (Neu integriert)
+ * ERMITTELT DIE PHASE_ID EINES SPIELS
  * Hilft dem Admin und der Punkteberechnung, Spiele ohne manuelle Dropdowns
  * der exakten Tipp-Phase zuzuordnen.
- * * @param {Object} match - Das Spiel-Objekt aus der Datenbank
- * @returns {number} phaseId
  */
 export function getPhaseIdFromMatch(match) {
   if (!match) return 1;
@@ -42,9 +40,7 @@ export function getPhaseIdFromMatch(match) {
 export function calculateTable(groupMatches, currentTips) {
   const table = {};
 
-  // LOGIK-KORREKTUR: Vorab-Initialisierung aller Teams einer Gruppe.
-  // Wenn ein User die Seite frisch öffnet und noch keine Tipps eingetragen hat,
-  // würden die Teams sonst komplett aus der Tabelle verschwinden.
+  // Vorab-Initialisierung aller Teams einer Gruppe
   groupMatches.forEach((m) => {
     if (!table[m.team_a]) table[m.team_a] = { points: 0, goals: 0, conceded: 0 };
     if (!table[m.team_b]) table[m.team_b] = { points: 0, goals: 0, conceded: 0 };
@@ -52,9 +48,17 @@ export function calculateTable(groupMatches, currentTips) {
 
   groupMatches.forEach((m) => {
     const t = currentTips[m.id];
-    // Falls für ein Spiel noch kein Tipp existiert, überspringen wir die Punktevergabe,
-    // das Team bleibt aber dank der Vorab-Initialisierung mit 0 Punkten in der Tabelle.
     if (!t) return;
+
+    // FEHLER-BREMSE HIER: Wenn die Tore null, undefined oder leer sind, 
+    // ist das Spiel ungespielt -> Überspringen, damit es kein falsches 0:0 gibt!
+    if (
+      t.goals_a === null || t.goals_b === null || 
+      t.goals_a === undefined || t.goals_b === undefined ||
+      t.goals_a === "" || t.goals_b === ""
+    ) {
+      return;
+    }
 
     const A = m.team_a; 
     const B = m.team_b;
@@ -83,9 +87,6 @@ export function calculateTable(groupMatches, currentTips) {
 
 /**
  * FIFA-LOGIK: Sortiert die Tabelle nach den offiziellen Tie-Break-Regeln.
- * @param {Array} groupMatches - Alle Spiele der Gruppe
- * @param {Object} tips - Alle Tipps des Nutzers
- * @param {Object} manualRanks - Hilfsmittel für den "Losentscheid" (Stichwahl)
  */
 export function calculateFIFADataTable(groupMatches, tips, manualRanks = {}) {
   // 1. Grundwerte (Punkte, Tore etc.) berechnen
