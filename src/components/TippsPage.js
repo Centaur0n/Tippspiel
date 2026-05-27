@@ -122,17 +122,19 @@ function TippsPage({ player, phaseId }) {
     phaseId 
   }), [groupResults, bestThirds, tips, phaseId]);
 
-  // HIER NEU: Exakte Prüfung der 72 Gruppenspiele
+  // SCHÄRFERE PRÜFUNG: Exakte Kontrolle aller 72 Gruppenspiele (A- und B-Tore müssen existieren)
   const allGroupMatchesFinished = useMemo(() => {
     const groupMatches = matches.filter(m => m.stage === "group");
     if (groupMatches.length === 0) return false;
     return groupMatches.every(m => {
       const t = tips[m.id];
-      return t && t.goals_a !== null && t.goals_a !== undefined && t.goals_a !== "";
+      return t && 
+        t.goals_a !== null && t.goals_a !== undefined && t.goals_a !== "" &&
+        t.goals_b !== null && t.goals_b !== undefined && t.goals_b !== "";
     });
   }, [matches, tips]);
 
-  // HIER GEÄNDERT: Validierung inklusive Stichwahlen
+  // VALIDIERUNG INKLUSIVE STICHWAHLEN
   const completionStatus = useMemo(() => {
     const targets = { 1: { m: 72, p: 32 }, 2: { m: 16, p: 16 }, 3: { m: 8, p: 8 }, 4: { m: 4, p: 4 }, 5: { m: 10, p: 6 } };
     const currentTarget = targets[numericPhaseId] || { m: 0, p: 0 };
@@ -160,7 +162,8 @@ function TippsPage({ player, phaseId }) {
         const teamsInGroup = allGroupsArray.find(g => g.id === name)?.teams || [];
         const isFinished = groupMatches.length > 0 && groupMatches.every(m => {
           const t = tips[m.id];
-          return t && t.goals_a !== null && t.goals_a !== undefined && t.goals_a !== "";
+          return t && t.goals_a !== null && t.goals_a !== undefined && t.goals_a !== "" &&
+                     t.goals_b !== null && t.goals_b !== undefined && t.goals_b !== "";
         });
         if (isFinished) {
           const tied = teamsInGroup.filter((teamA, i) => 
@@ -172,7 +175,7 @@ function TippsPage({ player, phaseId }) {
             const ranks = tied.map(t => manualRanks[t.team]);
             if (ranks.some(r => r === null || r === undefined || r === "")) groupRanksMissing = true;
             const clean = ranks.filter(r => r !== null && r !== undefined && r !== "");
-            if (new Set(clean).size !== clean.length) groupRanksMissing = true; // Duplikate verhindern
+            if (new Set(clean).size !== clean.length) groupRanksMissing = true; 
           }
         }
       });
@@ -213,13 +216,13 @@ function TippsPage({ player, phaseId }) {
     { id: 'intro', title: 'Tipp-Zentrale', text: 'Willkommen! Hier gibst du deine Vorhersagen ab. Alle Eingaben werden sofort im Hintergrund gesichert.', placement: 'bottom' },
     ...(numericPhaseId === 1 ? [
       { id: 'groups', title: 'Gruppenphase', text: 'Trage hier deine Ergebnistipps ein. Die Tabellenstände berechnen und aktualisieren sich vollautomatisch in Echtzeit!', placement: 'bottom' },
-      { id: 'thirds', title: 'Beste Gruppendritte', text: 'Diese Sondertabelle filtert die vier besten Gruppendritten heraus, die sich ebenfalls für das Achtelfinale qualifizieren.', placement: 'top' }
+      ...(allGroupMatchesFinished ? [{ id: 'thirds', title: 'Beste Gruppendritte', text: 'Diese Sondertabelle filtert die vier besten Gruppendritten heraus, die sich ebenfalls für das Achtelfinale qualifizieren.', placement: 'top' }] : [])
     ] : []),
     { id: 'ko', title: 'KO-Phase & Turnierbaum', text: 'Tippe hier den Verlauf der KO-Runden. Steht es nach regulärer Spielzeit unentschieden, kannst du per Klick direkt das Sieger-Team bestimmen.', placement: 'top' },
     ...(numericPhaseId === 5 ? [
       { id: 'matrix', title: 'Final-Matrix', text: 'In Phase 5 tippst du hier alle mathematisch möglichen Finalkonstellationen parallel, um die Maximalpunkte abzuräumen!', placement: 'left' }
     ] : [])
-  ], [numericPhaseId]);
+  ], [numericPhaseId, allGroupMatchesFinished]);
 
   const currentTourStep = currentTourIndex !== null ? tourSteps[currentTourIndex] : null;
 
@@ -434,7 +437,6 @@ function TippsPage({ player, phaseId }) {
                 🔒 Phase gesperrt
               </div>
             ) : (phase?.id === 5 ? completionStatus.currentM !== completionStatus.targetM : !completionStatus.isReady) ? (
-              /* HIER GEÄNDERT: Detailliertes Fehler-Feedback bei blockierter Abgabe */
               <div style={{ color: "#dc2626", fontWeight: "600", fontSize: "13px", padding: "8px 12px", border: "1px dashed #fca5a5", borderRadius: "8px", backgroundColor: "#fff5f5" }}>
                 ❌ Abgabe gesperrt: {
                   completionStatus.groupRanksMissing ? "Es fehlen noch Stichwahlen in den Tabellen!" :
@@ -489,12 +491,21 @@ function TippsPage({ player, phaseId }) {
                   )}
                 </div>
 
-                <div id="tour-thirds" style={{ ...getTourStyle('thirds'), padding: "10px" }}>
-                  <BestThirdsTable teams={bestThirds} manualRanks={manualRanks} onSaveManualRank={saveManualRank} isSubmitted={isReadOnly} />
-                  {currentTourStep?.id === 'thirds' && (
-                    <TourTooltip step={currentTourIndex} totalSteps={tourSteps.length} text={currentTourStep.text} placement={currentTourStep.placement} onNext={handleTourNext} onPrev={handleTourPrev} onClose={() => setCurrentTourIndex(null)} />
-                  )}
-                </div>
+                {/* HIER GEÄNDERT: Die gesamte Sektion blendet sich erst ein, wenn alle 72 Spiele getippt sind */}
+                {allGroupMatchesFinished && (
+                  <div id="tour-thirds" style={{ ...getTourStyle('thirds'), padding: "10px" }}>
+                    <BestThirdsTable 
+                      teams={bestThirds} 
+                      manualRanks={manualRanks} 
+                      onSaveManualRank={saveManualRank} 
+                      isSubmitted={isReadOnly} 
+                      isGroupPhaseComplete={allGroupMatchesFinished} // Reicht den Status weiter
+                    />
+                    {currentTourStep?.id === 'thirds' && (
+                      <TourTooltip step={currentTourIndex} totalSteps={tourSteps.length} text={currentTourStep.text} placement={currentTourStep.placement} onNext={handleTourNext} onPrev={handleTourPrev} onClose={() => setCurrentTourIndex(null)} />
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -503,7 +514,6 @@ function TippsPage({ player, phaseId }) {
             <div id="tour-ko" style={{ ...getTourStyle('ko'), padding: "10px" }}>
               <h3 style={{ marginLeft: "20px" }}>KO-Phase</h3>
               
-              {/* HIER NEU: Visueller Hinweis für den User bezüglich der 72-Spiele-Bremse */}
               {numericPhaseId === 1 && !allGroupMatchesFinished && (
                 <div style={{ marginLeft: "20px", marginBottom: "15px", color: "#eab308", fontWeight: "600", fontSize: "14px", backgroundColor: "#fef08a", padding: "8px 12px", borderRadius: "8px", border: "1px solid #fde047", maxWidth: "500px" }}>
                   ⚠️ Der KO-Baum wird erst freigeschaltet, wenn alle 72 Gruppenspiele vollständig getippt wurden.
@@ -516,7 +526,6 @@ function TippsPage({ player, phaseId }) {
                   phase={{ ...phase, is_submitted: isReadOnly }} 
                   getTopPosition={(rIdx, mIdx) => getTopPosition(rIdx, mIdx, treeHeight, currentSpacing) - topOffset} 
                   
-                  // HIER GEÄNDERT: Liefert erst Teams, wenn alle 72 Spiele getippt sind
                   getTeamFromPrevious={(rIdx, mIdx, side) => {
                     if (numericPhaseId === 1 && !allGroupMatchesFinished) return null;
                     if (numericPhaseId === 1 && rIdx === 0) {
@@ -531,7 +540,6 @@ function TippsPage({ player, phaseId }) {
                     return resolveSlot(slot, tournamentContext);
                   }} 
                   
-                  // HIER GEÄNDERT: Sperrt Eingaben im KO-Baum vor Abschluss der 72 Spiele
                   saveTip={isReadOnly || (numericPhaseId === 1 && !allGroupMatchesFinished) ? null : saveTip} 
                   deleteKORound={isReadOnly ? null : deleteKORound} 
                   KO_STRUCTURE={KO_STRUCTURE} isAdmin={false} 

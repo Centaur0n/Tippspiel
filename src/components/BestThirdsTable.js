@@ -4,44 +4,45 @@ import { BEST_THIRDS_STYLES } from '../Utils/uiConstants';
 
 /**
  * BestThirdsTable: Komponente zur Darstellung der Rangliste der Gruppendritten.
- * Nutzt zentralisierte Styles aus uiConstants und verarbeitet normierte Team-Objekte.
+ * Blendet die Stichwahl-Box erst ein, wenn alle Gruppenspiele abgeschlossen sind.
  */
 function BestThirdsTable({ 
   teams, 
   manualRanks = {}, 
   onSaveManualRank, 
   isSubmitted, 
-  canEditRanks = true
+  canEditRanks = true // Steuert, ob alle 72 Spiele eingetragen sind
 }) {
   
   if (!teams || teams.length === 0) return null;
 
-  // --- 1. LOGIK: GLEICHSTAND IDENTIFIZIEREN (Nutzt jetzt die normierten Keys) ---
-  const tiedTeams = teams.filter((team, index) => {
-    const next = teams[index + 1];
-    const prev = teams[index - 1];
-    
-    const isTiedWithNext = next && 
-      team.points === next.points && 
-      team.diff === next.diff && 
-      team.goals === next.goals;
-      
-    const isTiedWithPrev = prev && 
-      team.points === prev.points && 
-      team.diff === prev.diff && 
-      team.goals === prev.goals;
+  // --- 1. LOGIK: RELEVANTEN GLEICHSTAND AN DER QUALIFIKATIONSGRENZE PRÜFEN ---
+  const cutoffIndex = 7; // 8. Platz (Index 7) ist die Grenze
+  const targetTeam = teams[cutoffIndex];
+  const nextTeam = teams[cutoffIndex + 1];
 
-    return isTiedWithNext || isTiedWithPrev;
-  });
+  const isBorderTied = targetTeam && nextTeam &&
+    targetTeam.points === nextTeam.points &&
+    targetTeam.diff === nextTeam.diff &&
+    targetTeam.goals === nextTeam.goals;
 
-  const hasTies = tiedTeams.length > 0;
+  const tiedTeams = isBorderTied 
+    ? teams.filter(team => 
+        team.points === targetTeam.points &&
+        team.diff === targetTeam.diff &&
+        team.goals === targetTeam.goals
+      )
+    : [];
+
+  // --- NEU: Box NUR anzeigen bei echtem Gleichstand UND wenn alle Spiele eingetragen sind ---
+  const showTieBox = tiedTeams.length > 0 && canEditRanks;
 
   return (
     <div style={BEST_THIRDS_STYLES.container}>
       <h3 style={BEST_THIRDS_STYLES.title}>Rangliste der Gruppendritten</h3>
 
-      {/* --- FEHLERMELDUNG & MANUELLE STICHWAHL --- */}
-      {hasTies && (
+      {/* --- FEHLERMELDUNG & MANUELLE STICHWAHL (Wird erst nach 72 Spielen sichtbar) --- */}
+      {showTieBox && (
         <div style={BEST_THIRDS_STYLES.errorBox}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
             <span style={{ fontSize: '1.2rem' }}>⚠️</span>
@@ -83,11 +84,6 @@ function BestThirdsTable({
               );
             })}
           </div>
-          {!canEditRanks && (
-            <p style={{ color: "#e53e3e", fontSize: "0.75rem", marginTop: "10px" }}>
-              * Eingabe erst möglich, wenn alle Gruppenspiele eingetragen sind.
-            </p>
-          )}
         </div>
       )}
 
@@ -106,7 +102,7 @@ function BestThirdsTable({
         
         <tbody>
           {teams.slice(0, 12).map((team, index) => {
-            const isQualified = index < 8; // Die besten 8 von 12 kommen weiter
+            const isQualified = index < 8;
 
             return (
               <tr key={`${team.team}-${index}`} style={BEST_THIRDS_STYLES.row(isQualified)}>
