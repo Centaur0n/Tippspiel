@@ -19,30 +19,6 @@ import KOBracket from './KOBracket';
 import BestThirdsTable from './BestThirdsTable';
 import Phase5Matrix from './Phase5Matrix';
 
-const TourTooltip = ({ step, totalSteps, text, onNext, onPrev, onClose, placement = "top" }) => {
-  const isTop = placement === "top";
-  const isLeft = placement === "left";
-
-  return (
-    <div style={{
-      position: "absolute", left: isLeft ? "auto" : "50%", right: isLeft ? "calc(100% + 16px)" : "auto", transform: isLeft ? "none" : "translateX(-50%)",
-      ...(isTop ? { bottom: "calc(100% + 16px)" } : isLeft ? { top: "20%" } : { top: "calc(100% + 16px)" }),
-      backgroundColor: "#1e293b", color: "white", padding: "16px", borderRadius: "12px", boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.3)", zIndex: 9999, width: "280px"
-    }}>
-      <div style={{ fontWeight: "700", marginBottom: "6px", color: "#38bdf8", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <span>Schritt {step + 1} von {totalSteps}</span>
-        <button onClick={onClose} style={{ background: "none", border: "none", color: "#94a3b8", cursor: "pointer" }}>✕</button>
-      </div>
-      <p style={{ margin: "0 0 12px 0", lineHeight: "1.5", color: "#f1f5f9" }}>{text}</p>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: "8px" }}>
-        <button onClick={onPrev} disabled={step === 0} style={{ padding: "6px 12px", borderRadius: "6px", border: "1px solid #475569", color: step === 0 ? "#475569" : "#f1f5f9", cursor: step === 0 ? "not-allowed" : "pointer", fontSize: "12px" }}>Zurück</button>
-        <button onClick={onNext} style={{ padding: "6px 12px", borderRadius: "6px", border: "none", backgroundColor: "#2563eb", color: "white", cursor: "pointer", fontSize: "12px", fontWeight: "600" }}>{step === totalSteps - 1 ? "Fertig" : "Weiter"}</button>
-      </div>
-      <div style={{ position: "absolute", width: "12px", height: "12px", backgroundColor: "#1e293b", transform: "rotate(45deg)", ...(isLeft ? { right: "-6px", top: "calc(20% + 12px)" } : { left: "50%", transform: "translateX(-50%) rotate(45deg)", ...(isTop ? { bottom: "-6px" } : { top: "-6px" }) }) }} />
-    </div>
-  );
-};
-
 function TippsPage({ player, phaseId }) {
   const numericPhaseId = useMemo(() => Number(phaseId), [phaseId]);
 
@@ -56,7 +32,6 @@ function TippsPage({ player, phaseId }) {
   const [showConfirmModal, setShowConfirmModal] = useState(false);   
   const [treeHeight, setTreeHeight] = useState(800);  
   const groupRef = useRef(null);                      
-  const [currentTourIndex, setCurrentTourIndex] = useState(null);
 
   // --- INITIALES LADEN ---
   useEffect(() => {
@@ -122,7 +97,7 @@ function TippsPage({ player, phaseId }) {
     phaseId 
   }), [groupResults, bestThirds, tips, phaseId]);
 
-  // SCHÄRFERE PRÜFUNG: Exakte Kontrolle aller 72 Gruppenspiele (A- und B-Tore müssen existieren)
+  // Exakte Kontrolle aller Gruppenspiele (A- und B-Tore müssen existieren)
   const allGroupMatchesFinished = useMemo(() => {
     const groupMatches = matches.filter(m => m.stage === "group");
     if (groupMatches.length === 0) return false;
@@ -211,52 +186,6 @@ function TippsPage({ player, phaseId }) {
 
   const isReadOnly = phase?.is_submitted || systemConfig?.tips_locked_global || isPlayerSubmitted;
   const showContent = !systemConfig?.tips_locked_global;
-
-  const tourSteps = useMemo(() => [
-    { id: 'intro', title: 'Tipp-Zentrale', text: 'Willkommen! Hier gibst du deine Vorhersagen ab. Alle Eingaben werden sofort im Hintergrund gesichert.', placement: 'bottom' },
-    ...(numericPhaseId === 1 ? [
-      { id: 'groups', title: 'Gruppenphase', text: 'Trage hier deine Ergebnistipps ein. Die Tabellenstände berechnen und aktualisieren sich vollautomatisch in Echtzeit!', placement: 'bottom' },
-      ...(allGroupMatchesFinished ? [{ id: 'thirds', title: 'Beste Gruppendritte', text: 'Diese Sondertabelle filtert die vier besten Gruppendritten heraus, die sich ebenfalls für das Achtelfinale qualifizieren.', placement: 'top' }] : [])
-    ] : []),
-    { id: 'ko', title: 'KO-Phase & Turnierbaum', text: 'Tippe hier den Verlauf der KO-Runden. Steht es nach regulärer Spielzeit unentschieden, kannst du per Klick direkt das Sieger-Team bestimmen.', placement: 'top' },
-    ...(numericPhaseId === 5 ? [
-      { id: 'matrix', title: 'Final-Matrix', text: 'In Phase 5 tippst du hier alle mathematisch möglichen Finalkonstellationen parallel, um die Maximalpunkte abzuräumen!', placement: 'left' }
-    ] : [])
-  ], [numericPhaseId, allGroupMatchesFinished]);
-
-  const currentTourStep = currentTourIndex !== null ? tourSteps[currentTourIndex] : null;
-
-  useEffect(() => {
-    if (currentTourIndex !== null && currentTourStep?.id) {
-      const targetElement = document.getElementById(`tour-${currentTourStep.id}`);
-      if (targetElement) {
-        targetElement.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
-      }
-    }
-  }, [currentTourIndex, currentTourStep]);
-
-  const handleTourNext = () => {
-    if (currentTourIndex === tourSteps.length - 1) {
-      setCurrentTourIndex(null);
-    } else {
-      setCurrentTourIndex(prev => prev + 1);
-    }
-  };
-
-  const handleTourPrev = () => {
-    if (currentTourIndex > 0) setCurrentTourIndex(prev => prev - 1);
-  };
-
-  const getTourStyle = (stepId) => {
-    const isActive = currentTourStep?.id === stepId;
-    return {
-      transition: "all 0.3s ease-in-out", position: "relative",
-      ...(isActive && {
-        outline: "3px solid #2563eb", outlineOffset: "6px", borderRadius: "12px",
-        boxShadow: "0 0 25px rgba(37, 99, 235, 0.35)", backgroundColor: "rgba(37, 99, 235, 0.02)", zIndex: 10
-      })
-    };
-  };
 
   // --- API CALLS ---
   async function fetchMatches() {
@@ -424,7 +353,7 @@ function TippsPage({ player, phaseId }) {
     <div style={{ padding: "20px", width: "max-content", minWidth: "100%", position: "relative" }}>
       
       {showContent && (
-        <div id="tour-intro" style={{ ...getTourStyle('intro'), display: "flex", justifyContent: "flex-start", alignItems: "center", marginBottom: "20px", padding: "10px", backgroundColor: "#f8fafc", borderRadius: "12px", border: "1px solid #e2e8f0" }}>
+        <div style={{ display: "flex", justifyContent: "flex-start", alignItems: "center", marginBottom: "20px", padding: "10px", backgroundColor: "#f8fafc", borderRadius: "12px", border: "1px solid #e2e8f0" }}>
           <div>
             <h2 style={{ margin: 0, color: "#0f172a", marginRight: "30px" }}>Tippabgabe – Phase {phaseId}</h2>
           </div>
@@ -454,18 +383,7 @@ function TippsPage({ player, phaseId }) {
                 🚀 Tipps final abgeben
               </button>
             )}
-
-            <button 
-              onClick={() => setCurrentTourIndex(0)}
-              style={{ padding: "8px 16px", borderRadius: "8px", border: "1px solid #cbd5e1", backgroundColor: "white", color: "#475569", cursor: "pointer", fontWeight: "600", fontSize: "13px" }}
-            >
-              Anleitung anzeigen 🚀
-            </button>
           </div>
-
-          {currentTourStep?.id === 'intro' && (
-            <TourTooltip step={currentTourIndex} totalSteps={tourSteps.length} text={currentTourStep.text} placement={currentTourStep.placement} onNext={handleTourNext} onPrev={handleTourPrev} onClose={() => setCurrentTourIndex(null)} />
-          )}
         </div>
       )}
 
@@ -476,7 +394,7 @@ function TippsPage({ player, phaseId }) {
           {numericPhaseId === 1 && (
             <div style={{ flexShrink: 0, width: "fit-content" }}>
               <div ref={groupRef}>
-                <div id="tour-groups" style={{ ...getTourStyle('groups'), padding: "10px", marginBottom: "20px" }}>
+                <div style={{ padding: "10px", marginBottom: "20px" }}>
                   <h3 style={{ color: "#0f172a", fontSize: "1.3rem", fontWeight: "700", margin: "0 0 16px 0" }}>Gruppenphase</h3>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: "30px", marginBottom: "40px", maxWidth: "1100px" }}>
                     {Object.keys(grouped).sort().map(name => (
@@ -490,13 +408,10 @@ function TippsPage({ player, phaseId }) {
                       </div>
                     ))}
                   </div>
-                  {currentTourStep?.id === 'groups' && (
-                    <TourTooltip step={currentTourIndex} totalSteps={tourSteps.length} text={currentTourStep.text} placement={currentTourStep.placement} onNext={handleTourNext} onPrev={handleTourPrev} onClose={() => setCurrentTourIndex(null)} />
-                  )}
                 </div>
 
                 {allGroupMatchesFinished && (
-                  <div id="tour-thirds" style={{ ...getTourStyle('thirds'), padding: "10px" }}>
+                  <div style={{ padding: "10px" }}>
                     <BestThirdsTable 
                       teams={bestThirds} 
                       manualRanks={manualRanks} 
@@ -504,9 +419,6 @@ function TippsPage({ player, phaseId }) {
                       isSubmitted={isReadOnly} 
                       isGroupPhaseComplete={allGroupMatchesFinished} 
                     />
-                    {currentTourStep?.id === 'thirds' && (
-                      <TourTooltip step={currentTourIndex} totalSteps={tourSteps.length} text={currentTourStep.text} placement={currentTourStep.placement} onNext={handleTourNext} onPrev={handleTourPrev} onClose={() => setCurrentTourIndex(null)} />
-                    )}
                   </div>
                 )}
               </div>
@@ -516,7 +428,7 @@ function TippsPage({ player, phaseId }) {
           {/* HIER GEÄNDERT: flexShrink: 0 und width: "fit-content" gesetzt, damit der KO-Baum 
               seine echte Breite behält und nicht künstlich zusammengestaucht wird. */}
           <div style={{ flexShrink: 0, width: "fit-content" }}>
-            <div id="tour-ko" style={{ ...getTourStyle('ko'), padding: "10px" }}>
+            <div style={{ padding: "10px" }}>
               <h3 style={{ marginLeft: "20px", color: "#0f172a", fontSize: "1.3rem", fontWeight: "700" }}>KO-Phase</h3>
               
               {numericPhaseId === 1 && !allGroupMatchesFinished && (
@@ -552,15 +464,10 @@ function TippsPage({ player, phaseId }) {
                 {numericPhaseId === 5 && (
                   <Phase5Matrix 
                     koByRound={koByRound} tips={tips} isReadOnly={isReadOnly} resetOption={resetOption}
-                    saveTip={saveTip} getTourStyle={getTourStyle} currentTourStep={currentTourStep}
-                    currentTourIndex={currentTourIndex} tourSteps={tourSteps} handleTourNext={handleTourNext}
-                    handleTourPrev={handleTourPrev} setCurrentTourIndex={setCurrentTourIndex} TourTooltip={TourTooltip} 
+                    saveTip={saveTip}
                   />
                 )}
               </div>
-              {currentTourStep?.id === 'ko' && (
-                <TourTooltip step={currentTourIndex} totalSteps={tourSteps.length} text={currentTourStep.text} placement={currentTourStep.placement} onNext={handleTourNext} onPrev={handleTourPrev} onClose={() => setCurrentTourIndex(null)} />
-              )}
             </div>
           </div>
         </div>

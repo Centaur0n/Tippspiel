@@ -16,15 +16,12 @@ import SupportFeedbackPage from "./SupportFeedbackPage";
 import ProfilePage from "./Profile"; 
 import StatisticsPage from "./StatisticsPage";
 
-// --- TOUR COMPONENT & CONFIG IMPORT ---
-import InteractiveTour, { TOUR_STEPS } from "./InteractiveTour";
-
 const Dashboard = ({ player, onLogout }) => {
   const [localPlayer, setLocalPlayer] = useState(player);
   const [activePhase, setActivePhase] = useState("ranking");
   const [systemConfig, setSystemConfig] = useState(null);
   
-  // Modifiziert: Speichert nun alle Matches und Tipps für die Berechnungen rechts
+  // Speichert alle Matches und Tipps für die Berechnungen rechts
   const [allMatches, setAllMatches] = useState([]);
   const [allCommunityTips, setAllCommunityTips] = useState([]);
   
@@ -34,10 +31,6 @@ const Dashboard = ({ player, onLogout }) => {
   const [isPhase1Locked, setIsPhase1Locked] = useState(false);
   
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-  const [tourStep, setTourStep] = useState(0);
-  const [tourSubStep, setTourSubStep] = useState(0);
-
-  const isFirstProfileStep = tourStep === 1 && tourSubStep === 0;
 
   useEffect(() => {
     fetchDashboardData();
@@ -49,28 +42,17 @@ const Dashboard = ({ player, onLogout }) => {
     }
   }, [activePhase]);
 
-  useEffect(() => {
-    if (!loading && localPlayer?.id) {
-      if (localPlayer.finished_tutorial === false && tourStep === 0) {
-        setTourStep(1);
-        setTourSubStep(0); 
-        setActivePhase("profile"); 
-      }
-    }
-  }, [loading, localPlayer?.finished_tutorial, localPlayer?.id, tourStep]);
-
   async function fetchDashboardData() {
     if (allPhases.length === 0) setLoading(true);
     try {
-      // LOGIK-UPDATE: Wir laden alle Matches und alle abgegebenen User-Tipps,
-      // um Spieltage flexibel zu filtern und Tipp-Tendenzen (Balken) zu berechnen.
+      // Laden aller Matches und User-Tipps für die flexiblen Berechnungen
       const [configRes, phasesRes, matchesRes, pointsRes, playersRes, tipsRes] = await Promise.all([
         supabase.from("system_config").select("*").single(),
         supabase.from("tip_phase").select("*").order("id", { ascending: true }),
         supabase.from("match").select("*").order("match_order", { ascending: true }),
-        supabase.from("user_points_detail").select("*"), // Komplettes Detail-Objekt für Trend-Berechnung laden
-        supabase.from("player").select("id, name, display_name, name_color, jersey_number, supported_country, finished_tutorial, is_admin"),
-        supabase.from("tip").select("*") // Falls deine Tabelle anders heißt (z.B. "match_tip"), hier anpassen
+        supabase.from("user_points_detail").select("*"),
+        supabase.from("player").select("id, name, display_name, name_color, jersey_number, supported_country, is_admin"),
+        supabase.from("tip").select("*")
       ]);
 
       const phasesData = phasesRes.data || [];
@@ -87,8 +69,7 @@ const Dashboard = ({ player, onLogout }) => {
       const phase1 = phasesData.find(p => Number(p.id) === 1);
       setIsPhase1Locked(phase1 ? (phase1.is_submitted || configRes.data?.tips_locked_global) : false);
 
-      // --- 1. ERMITTLUNG DER SPIELTAGE (LOGIK-PRÜFUNG OK) ---
-      // Wir suchen das höchste Match, das bereits Tore/Ergebnisse eingetragen hat.
+      // --- 1. ERMITTLUNG DER SPIELTAGE ---
       const finishedMatches = matchesData.filter(m => 
         m.goals_a_real !== null && m.goals_b_real !== null && 
         m.goals_a_real !== undefined && m.goals_b_real !== undefined &&
@@ -97,12 +78,8 @@ const Dashboard = ({ player, onLogout }) => {
       const lastEvaluatedMatchday = finishedMatches.length > 0 
         ? Math.max(...finishedMatches.map(m => m.matchday || 1)) 
         : 0;
-      
-      // Der nächste Spieltag ist logischerweise der darauffolgende
-      const nextMatchday = lastEvaluatedMatchday + 1;
 
       // --- 2. BERECHNUNG AKTUELLER VS. VORHERIGER RANGLISTE FÜR TREND-PFEILE ---
-      // IDs der Matches des letzten Spieltags ermitteln, um sie für den "Vorher-Stand" abzuziehen
       const lastMatchdayMatchIds = finishedMatches
         .filter(m => (m.matchday || m.spieltag || 1) === lastEvaluatedMatchday)
         .map(m => m.id);
@@ -125,15 +102,15 @@ const Dashboard = ({ player, onLogout }) => {
       });
       previousRanking.sort((a, b) => b.points - a.points);
 
-      // Trends einspeisen (Aktuelle Platzierung vs. Vorherige Platzierung)
+      // Trends einspeisen
       const rankingWithTrends = calculatedRanking.map((player, currentIndex) => {
         const currentRank = currentIndex + 1;
         const prevIndex = previousRanking.findIndex(r => r.id === player.id);
         const prevRank = prevIndex !== -1 ? prevIndex + 1 : currentRank;
 
         let trend = "equal";
-        if (currentRank < prevRank) trend = "up";      // Platz verbessert (z.B. von Platz 5 auf 3)
-        if (currentRank > prevRank) trend = "down";    // Platz verschlechtert (z.B. von Platz 2 auf 4)
+        if (currentRank < prevRank) trend = "up";
+        if (currentRank > prevRank) trend = "down";
 
         return { ...player, trend };
       });
@@ -154,69 +131,6 @@ const Dashboard = ({ player, onLogout }) => {
   const getFirstActivePhaseId = () => {
     const firstActive = allPhases.find(p => p.is_active);
     return firstActive ? firstActive.id : "ranking";
-  };
-
-  const handleTourPrev = () => {
-    if (tourSubStep > 0) {
-      setTourSubStep(prev => prev - 1);
-    } else if (tourStep > 1) {
-      const prevStep = tourStep - 1;
-      if (TOUR_STEPS[prevStep]) {
-        const prevStepData = TOUR_STEPS[prevStep];
-        setTourStep(prevStep);
-        setTourSubStep(prevStepData.subSteps.length - 1);
-        let prevPhase = prevStepData.phase;
-        if (prevPhase === "FIRST_ACTIVE_PHASE") prevPhase = getFirstActivePhaseId();
-        setActivePhase(prevPhase || "ranking");
-      }
-    }
-  };
-
-  const handleTourNext = async () => {
-    const currentStepData = TOUR_STEPS[tourStep];
-    const totalSteps = Object.keys(TOUR_STEPS).length;
-    if (!currentStepData) { await finishTutorialInDB(); return; }
-
-    if (tourSubStep < currentStepData.subSteps.length - 1) {
-      setTourSubStep(prev => prev + 1);
-    } else if (tourStep < totalSteps) {
-      const nextStep = tourStep + 1;
-      if (TOUR_STEPS[nextStep]) {
-        let nextPhase = TOUR_STEPS[nextStep].phase;
-        if (nextPhase === "FIRST_ACTIVE_PHASE") nextPhase = getFirstActivePhaseId();
-        setActivePhase(nextPhase || "ranking");
-        setTourStep(nextStep);
-        setTourSubStep(0); 
-      } else {
-        await finishTutorialInDB();
-      }
-    } else {
-      await finishTutorialInDB();
-    }
-  };
-
-  const handleTourSkip = async () => { await finishTutorialInDB(); };
-
-  const finishTutorialInDB = async () => {
-    try {
-      const { error } = await supabase.from("player").update({ finished_tutorial: true }).eq("id", localPlayer.id);
-      if (error) throw error;
-      setLocalPlayer(prev => ({ ...prev, finished_tutorial: true }));
-      setTourStep(0); setTourSubStep(0); setActivePhase("ranking");
-    } catch (err) {
-      console.error("Fehler beim Speichern des Tutorialstatus:", err);
-    }
-  };
-
-  const handleResetTutorial = async () => {
-    try {
-      const { error } = await supabase.from("player").update({ finished_tutorial: false }).eq("id", localPlayer.id);
-      if (error) throw error;
-      setLocalPlayer(prev => ({ ...prev, finished_tutorial: false }));
-      setActivePhase("profile"); setTourStep(1); setTourSubStep(0);
-    } catch (err) {
-      console.error("Fehler beim Zurücksetzen des Tutorials:", err);
-    }
   };
 
   const handleProfileSave = async (updatedData) => {
@@ -240,20 +154,6 @@ const Dashboard = ({ player, onLogout }) => {
   if (loading) return <div style={{ padding: "20px", color: "#0f172a" }}>Dashboard wird geladen...</div>;
 
   const displayName = localPlayer.display_name && localPlayer.display_name !== "EMPTY" ? localPlayer.display_name : localPlayer.name;
-
-  const getSidebarHighlightStyle = (elementId) => {
-    const currentStepData = TOUR_STEPS[tourStep];
-    if (!currentStepData) return {};
-    const currentSubStepData = currentStepData.subSteps[tourSubStep];
-    if (currentSubStepData?.id === elementId) {
-      return {
-        position: "relative", zIndex: 9999, 
-        boxShadow: "0 0 0 4px #f59e0b, 0 10px 30px rgba(245, 158, 11, 0.25)", 
-        borderRadius: "12px", backgroundColor: "#ffffff", transition: "all 0.3s ease-in-out"
-      };
-    }
-    return { transition: "all 0.3s ease-in-out" };
-  };
 
   // --- HILFSFUNKTION FÜR DAS RENDERING DER SPIEL-TENDENZEN RECHTS ---
   const renderMatchTendencyCard = (m) => {
@@ -279,7 +179,7 @@ const Dashboard = ({ player, onLogout }) => {
         padding: "16px", marginBottom: "14px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)"
       }}>
         {/* Teams & Ergebnis */}
-        <div style={{ display: "flex", justifyContent: "between", alignItems: "center", marginBottom: "10px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
           <span style={{ fontSize: "0.85rem", color: "#64748b", fontWeight: "600" }}>Gruppe {m.group_name}</span>
           {m.goals_a !== null && (
             <span style={{ backgroundColor: "#10b981", color: "white", padding: "2px 8px", borderRadius: "6px", fontSize: "0.8rem", fontWeight: "700", marginLeft: "auto" }}>
@@ -322,7 +222,7 @@ const Dashboard = ({ player, onLogout }) => {
     );
   };
 
-  // Aktuelle Spieltage berechnen für die Filterung der rechten Spalte
+ // Aktuelle Spieltage berechnen für die Filterung der rechten Spalte
   const finishedMatchesList = allMatches.filter(m => 
     m.goals_a_real !== null && m.goals_b_real !== null &&
     m.goals_a_real !== undefined && m.goals_b_real !== undefined
@@ -343,7 +243,7 @@ const Dashboard = ({ player, onLogout }) => {
         ...DASHBOARD_STYLES.sidebar, 
         width: isSidebarCollapsed ? "80px" : "280px", 
         minWidth: isSidebarCollapsed ? "80px" : "280px",
-        height: "100%", position: "relative", zIndex: isFirstProfileStep ? 9999 : 10,
+        height: "100%", position: "relative", zIndex: 10,
         display: "flex", flexDirection: "column", overflowY: "auto", overflowX: "hidden",
         padding: isSidebarCollapsed ? "16px 8px" : "20px 16px", margin: 0, boxSizing: "border-box",
         transition: "width 0.3s cubic-bezier(0.4, 0, 0.2, 1), min-width 0.3s cubic-bezier(0.4, 0, 0.2, 1), padding 0.3s ease",
@@ -365,8 +265,8 @@ const Dashboard = ({ player, onLogout }) => {
         <div style={{ 
           ...DASHBOARD_STYLES.profileBox, display: "flex", flexDirection: "column", gap: "14px", 
           padding: isSidebarCollapsed ? "8px" : "16px", boxSizing: "border-box",
-          border: isFirstProfileStep ? "1px solid #f59e0b" : "1px solid #e2e8f0",
-          backgroundColor: "#ffffff", ...getSidebarHighlightStyle("sidebar_profile"),
+          border: "1px solid #e2e8f0",
+          backgroundColor: "#ffffff",
           alignItems: isSidebarCollapsed ? "center" : "stretch"
         }}>
           <div style={{ display: "flex", alignItems: "center", gap: "14px", width: "100%", justifyContent: isSidebarCollapsed ? "center" : "flex-start" }}>
@@ -420,7 +320,7 @@ const Dashboard = ({ player, onLogout }) => {
         <nav style={{ ...DASHBOARD_STYLES.nav, width: "100%", display: "flex", flexDirection: "column", gap: "4px" }}>
           <button 
             onClick={() => setActivePhase("ranking")} 
-            style={{ ...getTabButtonStyle(activePhase === "ranking"), ...getSidebarHighlightStyle("sidebar_home"), justifyContent: isSidebarCollapsed ? "center" : "flex-start" }}
+            style={{ ...getTabButtonStyle(activePhase === "ranking"), justifyContent: isSidebarCollapsed ? "center" : "flex-start" }}
             title="Startseite"
           >
             {isSidebarCollapsed ? "🏠" : "🏠 Startseite"}
@@ -429,7 +329,7 @@ const Dashboard = ({ player, onLogout }) => {
           <hr style={DASHBOARD_STYLES.divider} />
           {!isSidebarCollapsed && <p style={{ ...DASHBOARD_STYLES.sectionHeader, color: "#475569", fontWeight: "700" }}>Tipp-Runden</p>}
           
-          <div style={{ ...getSidebarHighlightStyle("sidebar_phases"), display: "flex", flexDirection: "column", gap: "4px" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
             {allPhases.filter(p => p.is_active).map((p) => (
               <button 
                 key={p.id} 
@@ -444,7 +344,7 @@ const Dashboard = ({ player, onLogout }) => {
 
           <button 
             onClick={() => setActivePhase("bonus_questions")} 
-            style={{ ...getPhaseButtonStyle(activePhase === "bonus_questions", systemConfig?.current_phase_id === 1), ...getSidebarHighlightStyle("sidebar_bonus"), justifyContent: isSidebarCollapsed ? "center" : "flex-start" }}
+            style={{ ...getPhaseButtonStyle(activePhase === "bonus_questions", systemConfig?.current_phase_id === 1), justifyContent: isSidebarCollapsed ? "center" : "flex-start" }}
             title="Bonusfragen"
           >
             {isSidebarCollapsed ? "🏆" : `🏆 Bonusfragen ${isPhase1Locked ? " 🔒" : ""}`}
@@ -468,7 +368,7 @@ const Dashboard = ({ player, onLogout }) => {
           
           <button 
             onClick={() => setActivePhase("points_analysis")} 
-            style={{ ...getTabButtonStyle(activePhase === "points_analysis"), ...getSidebarHighlightStyle("sidebar_points"), justifyContent: isSidebarCollapsed ? "center" : "flex-start" }}
+            style={{ ...getTabButtonStyle(activePhase === "points_analysis"), justifyContent: isSidebarCollapsed ? "center" : "flex-start" }}
             title="Punkte-Analyse"
           >
             {isSidebarCollapsed ? "📊" : "📊 Punkte-Analyse"}
@@ -476,7 +376,7 @@ const Dashboard = ({ player, onLogout }) => {
 
           <button 
             onClick={() => setActivePhase("global_statistics")} 
-            style={{ ...getTabButtonStyle(activePhase === "global_statistics"), ...getSidebarHighlightStyle("sidebar_stats"), justifyContent: isSidebarCollapsed ? "center" : "flex-start" }}
+            style={{ ...getTabButtonStyle(activePhase === "global_statistics"), justifyContent: isSidebarCollapsed ? "center" : "flex-start" }}
             title="Statistik-Center"
           >
             {isSidebarCollapsed ? "📈" : "📈 Statistik-Center"}
@@ -496,8 +396,7 @@ const Dashboard = ({ player, onLogout }) => {
       {/* 🟢 HAUPTBEREICH */}
       <main style={{ 
         flex: 1, height: "100%", overflow: "auto", padding: "24px 30px", boxSizing: "border-box",
-        position: "relative", zIndex: 1, filter: isFirstProfileStep ? "blur(10px) brightness(0.85)" : "none",
-        pointerEvents: isFirstProfileStep ? "none" : "auto", transition: "filter 0.4s ease-in-out, transform 0.4s ease-in-out"
+        position: "relative", zIndex: 1, transition: "filter 0.4s ease-in-out, transform 0.4s ease-in-out"
       }}>
         {activePhase === "ranking" ? (
           /* 🌟 NEUES GRID-LAYOUT: Rangliste links (schmaler) & Spieltage rechts */
@@ -593,32 +492,23 @@ const Dashboard = ({ player, onLogout }) => {
             ) : activePhase === "profile" ? (
               <ProfilePage 
                 player={localPlayer} onSave={handleProfileSave} onBack={() => setActivePhase("ranking")}
-                tourStep={tourStep} tourSubStep={tourSubStep} onNext={handleTourNext} onPrev={handleTourPrev}
-                onSkip={handleTourSkip} currentTourData={TOUR_STEPS[tourStep]} onResetTutorial={handleResetTutorial} 
               />
             ) : activePhase === "points_analysis" ? (
-              <PointsAnalysisPage userId={localPlayer.id} tourStep={tourStep} tourSubStep={tourSubStep} />
+              <PointsAnalysisPage userId={localPlayer.id} />
             ) : activePhase === "global_statistics" ? (
-              <StatisticsPage currentUserId={localPlayer.id} tourStep={tourStep} tourSubStep={tourSubStep} />    
+              <StatisticsPage currentUserId={localPlayer.id} />    
             ) : activePhase === "bonus_questions" ? (
-              <BonusQuestions userId={localPlayer.id} isReadOnly={isPhase1Locked} isAdmin={localPlayer.is_admin} tourStep={tourStep} tourSubStep={tourSubStep} />
+              <BonusQuestions userId={localPlayer.id} isReadOnly={isPhase1Locked} isAdmin={localPlayer.is_admin} />
             ) : activePhase === "support_feedback" ? (
               <SupportFeedbackPage playerId={localPlayer.id} playerName={displayName} isAdmin={localPlayer.is_admin} />
             ) : (
               <TippsPage 
                 player={localPlayer} phaseId={activePhase} isAdmin={localPlayer.is_admin} 
-                tourStep={tourStep} tourSubStep={tourSubStep} onNext={handleTourNext} onPrev={handleTourPrev}
-                onSkip={handleTourSkip} currentTourData={TOUR_STEPS[tourStep]}
               />
             )}
           </div>
         )}
       </main>
-
-      {/* RENDERING DER EXTERNEN TOUR-ENGINE */}
-      {tourStep > 0 && (
-        <InteractiveTour tourStep={tourStep} tourSubStep={tourSubStep} onNext={handleTourNext} onSkip={handleTourSkip} />
-      )}
     </div>
   );
 };

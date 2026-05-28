@@ -8,15 +8,7 @@ export default function Phase5Matrix({
   tips,
   isReadOnly,
   resetOption,
-  saveTip,
-  getTourStyle,
-  currentTourStep,
-  currentTourIndex,
-  tourSteps,
-  handleTourNext,
-  handleTourPrev,
-  setCurrentTourIndex,
-  TourTooltip
+  saveTip
 }) {
   const h1 = koByRound[4]?.[0];
   const h2 = koByRound[4]?.[1];
@@ -75,7 +67,7 @@ export default function Phase5Matrix({
   ];
 
   return (
-    <div id="tour-matrix" style={{ ...getTourStyle('matrix'), display: "flex", gap: "30px", marginLeft: "40px", padding: "10px" }}>
+    <div style={{ display: "flex", gap: "30px", marginLeft: "40px", padding: "10px" }}>
       {options.map(opt => {
         const tipF = tips[`OPT${opt.id}_F`];
         const tipS3 = tips[`OPT${opt.id}_S3`];
@@ -113,12 +105,6 @@ export default function Phase5Matrix({
           </div>
         );
       })}
-      {currentTourStep?.id === 'matrix' && (
-        <TourTooltip 
-          step={currentTourIndex} totalSteps={tourSteps.length} text={currentTourStep.text} placement={currentTourStep.placement}
-          onNext={handleTourNext} onPrev={handleTourPrev} onClose={() => setCurrentTourIndex(null)}
-        />
-      )}
     </div>
   );
 }

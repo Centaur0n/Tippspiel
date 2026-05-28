@@ -127,7 +127,6 @@ export default function ProfilePage({ player, onSave, onBack }) {
             </span>
           )}
           <button
-            id="profile_save" /* ID KORRIGIERT für Teilschritt 6/6 */
             onClick={handleSave}
             style={{ ...buttonStyle, backgroundColor: "#2563eb", color: "white", border: "1px solid #2563eb" }}
             onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#1d4ed8")}
@@ -189,7 +188,7 @@ export default function ProfilePage({ player, onSave, onBack }) {
         <div>
           
           {/* Sektion 1: Identität */}
-          <div id="profile_name" style={cardStyle}> {/* ID KORRIGIERT für Teilschritt 2/6 */}
+          <div style={cardStyle}>
             <h2 style={{ margin: "0 0 20px 0", fontSize: "16px", fontWeight: "700" }}>Identität</h2>
             <div style={{ marginBottom: "20px" }}>
               <label style={labelStyle}>Anzeigename</label>
@@ -205,7 +204,7 @@ export default function ProfilePage({ player, onSave, onBack }) {
           </div>
 
           {/* Sektion 2: Trikot-Konfigurator */}
-          <div id="profile_jersey" style={cardStyle}> {/* ID KORRIGIERT für Teilschritt 3/6 */}
+          <div style={cardStyle}>
             <h2 style={{ margin: "0 0 20px 0", fontSize: "16px", fontWeight: "700" }}>Trikot-Konfigurator</h2>
             
             <div style={{ marginBottom: "20px" }}>
@@ -263,7 +262,7 @@ export default function ProfilePage({ player, onSave, onBack }) {
           </div>
 
           {/* Sektion 3: Fankurve */}
-          <div id="profile_country" style={cardStyle}> {/* ID KORRIGIERT für Teilschritt 4/6 */}
+          <div style={cardStyle}>
             <h2 style={{ margin: "0 0 20px 0", fontSize: "16px", fontWeight: "700" }}>Fankurve</h2>
             <div style={{ marginBottom: "20px" }}>
               <label style={labelStyle}>Unterstütztes Land</label>
@@ -278,7 +277,7 @@ export default function ProfilePage({ player, onSave, onBack }) {
           </div>
 
           {/* Sektion 4: Sicherheit */}
-          <div id="profile_pin" style={cardStyle}> {/* ID KORRIGIERT für Teilschritt 5/6 */}
+          <div style={cardStyle}>
             <h2 style={{ margin: "0 0 20px 0", fontSize: "16px", fontWeight: "700" }}>Sicherheit</h2>
             <div>
               <label style={labelStyle}>6-stellige Tipp-PIN</label>
