@@ -26,9 +26,41 @@ export const POINTS_CONFIG = {
   PROG_OUT_VORRUNDE: 2.2,
   PROG_TABLE_POS: 2.5,
 
+  BONUS_QUESTION_BASE: 20, // Basis-Punkte für Bonusfragen
+
   DIVISORS: {
     1: 1, 2: 1, 3: 1, 4: 1, 5: 1
   }
+};
+
+// --- HELPER: BERECHNET DIE PUNKTE FÜR DIE BONUSFRAGEN (+/- 1 REGEL) ---
+export const calculateBonusPoints = (qId, userAnswer, realAnswer, basePoints = 20) => {
+  if (!realAnswer || realAnswer === "EMPTY" || userAnswer === undefined || userAnswer === null || userAnswer === "") {
+    return 0;
+  }
+
+  const userStr = String(userAnswer).trim().toLowerCase();
+  const realStr = String(realAnswer).trim().toLowerCase();
+
+  // 1. Exakter Treffer -> Volle Punkte
+  if (userStr === realStr) {
+    return basePoints;
+  }
+
+  // 2. Teilpunkte-Regel (+/- 1) für Gesamttore, Verlängerungen und Eigentore
+  const partialPointsQuestions = ["total_goals", "extra_times", "own_goals"];
+  if (partialPointsQuestions.includes(qId)) {
+    const userNum = parseInt(userStr, 10);
+    const realNum = parseInt(realStr, 10);
+
+    if (!isNaN(userNum) && !isNaN(realNum)) {
+      if (Math.abs(userNum - realNum) === 1) {
+        return Math.ceil(basePoints / 2); // Hälfte der Punkte (aufgerundet)
+      }
+    }
+  }
+
+  return 0;
 };
 
 // --- HELPER: BERECHNET DIE PUNKTE FÜR EINEN EINZELNEN TIPP ---
@@ -85,7 +117,6 @@ export async function processStandardMatchTips(currentMatch, phaseId) {
 
   const mId = currentMatch.id;
 
-  // 1. Alle Tipps für dieses Match UND die aktive Phase laden
   const { data: tips, error: tipsErr } = await supabase
     .from("tip")
     .select("*")
@@ -94,8 +125,7 @@ export async function processStandardMatchTips(currentMatch, phaseId) {
 
   if (tipsErr || !tips || tips.length === 0) return;
 
-  // 2. Basis-Punkte ermitteln (Unterstützt deine dynamische FIFA-Rang-Logik)
-  let winnerPoints = 4; // Standardwert für KO
+  let winnerPoints = 4; 
   if (currentMatch.stage === "group") {
     const { data: teams } = await supabase
       .from('teams')
@@ -109,7 +139,6 @@ export async function processStandardMatchTips(currentMatch, phaseId) {
 
   const pointsEntries = [];
 
-  // 3. Jeden Tipp berechnen
   tips.forEach(tip => {
     const actualResults = {
       goals_a: currentMatch.goals_a_real,
@@ -127,7 +156,7 @@ export async function processStandardMatchTips(currentMatch, phaseId) {
       match_id: mId,
       match_order: currentMatch.match_order,
       category: "MATCH",
-      matchday: currentMatch.matchday, // Sauber hinterlegt
+      matchday: currentMatch.matchday, 
       points_total: total,
       phase_id: phaseId,
       group_name: currentMatch.group_name || "KO",
@@ -140,7 +169,6 @@ export async function processStandardMatchTips(currentMatch, phaseId) {
     });
   });
 
-  // 4. Cleanup alter Einträge
   await supabase
     .from("user_points_detail")
     .delete()
@@ -148,20 +176,88 @@ export async function processStandardMatchTips(currentMatch, phaseId) {
     .eq("phase_id", phaseId)
     .eq("is_prognosis", false);
 
-  // 5. Per Insert speichern
   if (pointsEntries.length > 0) {
     await supabase.from("user_points_detail").insert(pointsEntries);
     console.log(`[ENGINE] ===== ${pointsEntries.length} Match-Tipps erfolgreich aktualisiert! =====`);
   }
 }
 
+// ==========================================
+// FUNKTION FÜR DIE BONUS-FRAGEN
+// ==========================================
+export async function processBonusQuestionsPoints() {
+  // 1. Alle abgegebenen Tipps aus der Tabelle laden
+  const { data: bonusTips, error: fetchErr } = await supabase
+    .from("user_bonus_tips")
+    .select("*");
+
+  if (fetchErr || !bonusTips || bonusTips.length === 0) return;
+
+  const pointsEntries = [];
+  const basePoints = POINTS_CONFIG.BONUS_QUESTION_BASE || 10;
+
+  // 2. Jeden Tipp einzeln auswerten
+  bonusTips.forEach(tip => {
+    const realAnswer = tip.real_answer;
+    
+    // Überspringen, falls noch kein Ergebnis feststeht
+    if (!realAnswer || realAnswer === "EMPTY") return;
+
+    const pointsTotal = calculateBonusPoints(tip.question, tip.user_answer, realAnswer, basePoints);
+
+    // Schönere Labels für das Breakdown-Infofeld erzeugen
+    let questionLabel = tip.question;
+    if (tip.question === "total_goals") questionLabel = "Meisten Gesamttore Spiel";
+    if (tip.question === "extra_times") questionLabel = "Anzahl Verlängerungen";
+    if (tip.question === "own_goals") questionLabel = "Anzahl Eigentore";
+    if (tip.question === "most_cards") questionLabel = "Meisten Karten pro Spiel (Team)";
+    if (tip.question === "most_team_goals") questionLabel = "Team meisten Tore pro Spiel";
+    if (tip.question === "most_conceded_goals") questionLabel = "Meiste Gegentore Gruppenphase";
+    if (tip.question === "pot4_furthest") questionLabel = "Topf 4 Team am weitesten";
+
+    // Mappen in das einheitliche user_points_detail Schema
+    pointsEntries.push({
+      player_id: tip.user_id, // user_id aus user_bonus_tips mappt auf player_id
+      match_id: null,
+      match_order: 999, // Fiktive hohe Order für das Ende der Liste
+      category: "BONUS",
+      matchday: 99, // Fiktiver Spieltag für Bonusfragen
+      points_total: pointsTotal,
+      phase_id: 1, 
+      group_name: "BONUS",
+      is_prognosis: true,
+      reference_team: ["pot4_furthest", "most_team_goals", "most_conceded_goals", "most_cards"].includes(tip.question) ? tip.user_answer : "",
+      breakdown: {
+        info: `Bonus: ${questionLabel}`,
+        descr: pointsTotal > 0 
+          ? `Erfolgreich! Tipp: ${tip.user_answer}, Ergebnis: ${realAnswer} (+${pointsTotal} Pkt.)`
+          : `Nicht korrekt. Tipp: ${tip.user_answer}, Ergebnis: ${realAnswer}`,
+        question_id: tip.question,
+        user_answer: tip.user_answer,
+        real_answer: realAnswer
+      }
+    });
+  });
+
+  // 3. Alte Bonuspunkte-Einträge bereinigen
+  await supabase
+    .from("user_points_detail")
+    .delete()
+    .eq("category", "BONUS");
+
+  // 4. Neue Berechnungen speichern
+  if (pointsEntries.length > 0) {
+    const { error: insertErr } = await supabase.from("user_points_detail").insert(pointsEntries);
+    if (insertErr) console.error("[BONUS-ENGINE] Fehler beim Speichern:", insertErr.message);
+    else console.log(`[BONUS-ENGINE] ===== ${pointsEntries.length} Bonus-Punkte erfolgreich berechnet! =====`);
+  }
+}
+
 // --- BERECHNUNG DER TURNIER-PFADE / PROGNOSEN ---
 export async function processPrognosisPoints(allMatches, currentMatch, forcedGroupName = null) {
-  if (currentMatch.goals_a_real === null || currentMatch.goals_b_real === null) {
-    return;
-  }
+  if (currentMatch.goals_a_real === null || currentMatch.goals_b_real === null) return;
 
-  const { id: mId, match_order: mOrder, stage, stage_order } = currentMatch;
+  const { id: mId, match_order: mOrder, stage } = currentMatch;
   const activeGroupName = forcedGroupName || currentMatch.group_name;
 
   let realGroup = null;
@@ -174,11 +270,8 @@ export async function processPrognosisPoints(allMatches, currentMatch, forcedGro
       .eq("group_name", activeGroupName || "")
       .maybeSingle();
 
-    if (groupErr) {
-      console.error("[POINTS] Fehler bei real_group_state:", groupErr.message);
-    } else {
-      realGroup = groupData;
-    }
+    if (groupErr) console.error("[POINTS] Fehler bei real_group_state:", groupErr.message);
+    else realGroup = groupData;
   }
 
   if (stage === "ko") {
@@ -188,11 +281,8 @@ export async function processPrognosisPoints(allMatches, currentMatch, forcedGro
       .eq("id", 1)
       .single();
 
-    if (koErr) {
-      console.error("[POINTS] Fehler bei real_ko_state:", koErr.message);
-    } else {
-      realKO = koData;
-    }
+    if (koErr) console.error("[POINTS] Fehler bei real_ko_state:", koErr.message);
+    else realKO = koData;
   }
 
   if (stage === "group" && !realGroup) return;
@@ -280,10 +370,7 @@ export async function processPrognosisPoints(allMatches, currentMatch, forcedGro
   if (stage === "ko" && currentMatch.winner_real !== 0 && realKO) {
     const { data: userKOProgs, error: koProgErr } = await supabase.from("user_prognosis_ko").select("*");
     
-    if (koProgErr) {
-      console.error("[PROG-DIAG] Fehler beim Laden von user_prognosis_ko:", koProgErr.message);
-      return;
-    }
+    if (koProgErr) return;
 
     if (userKOProgs) {
       const validKOProgs = userKOProgs.filter(p => p.reached_16 || p.reached_8 || p.reached_4 || p.reached_2 || p.winner_final);
@@ -296,7 +383,7 @@ export async function processPrognosisPoints(allMatches, currentMatch, forcedGro
         5: { name: "Finale / Platz 3", isFinalsRound: true }
       };
 
-      const activeRound = roundMapping[stage_order];
+      const activeRound = roundMapping[currentMatch.stage_order];
       if (activeRound) {
         const realWinnerOfThisMatch = currentMatch.winner_real === 1 ? currentMatch.team_a : currentMatch.team_b;
         const realLoserOfThisMatch = currentMatch.winner_real === 1 ? currentMatch.team_b : currentMatch.team_a;
@@ -346,7 +433,6 @@ export async function processPrognosisPoints(allMatches, currentMatch, forcedGro
     }
   }
 
-  // --- C. SPEICHERN & CLEANUP ---
   const uniquePointsMap = {};
   pointsEntries.forEach(entry => {
     const uniqueKey = `${entry.player_id}_${entry.category}_${entry.reference_team}_${entry.phase_id}`;
@@ -373,8 +459,6 @@ export async function processPrognosisPoints(allMatches, currentMatch, forcedGro
   }
 }
 
-// --- ENGINE INNER HELPER: BAUEN DER DB-RECORDS ---
-// HIER: matchday als 9. Parameter hinzugefügt, damit er sauber verarbeitet wird!
 function createPointEntry(playerId, category, points, team, phase, groupName, matchId, matchOrder, matchday, extra = {}) {
   let typeLabel = category === "GROUP_RANK" ? "Tabellenplatz" : "Turnier-Pfad";
   let detailDesc = `Erfolgreiche Prognose in Phase ${phase}`;
@@ -411,7 +495,7 @@ function createPointEntry(playerId, category, points, team, phase, groupName, ma
     is_prognosis: true,
     match_id: matchId, 
     match_order: matchOrder,
-    matchday: matchday, // Jetzt absolut fehlerfrei befüllt!
+    matchday: matchday, 
     breakdown: { 
       info: `${typeLabel}: ${team}`, 
       descr: detailDesc, 
