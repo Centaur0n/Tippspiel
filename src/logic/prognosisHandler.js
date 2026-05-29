@@ -30,6 +30,33 @@ export async function updateGroupPrognosisDB(playerId, groupsArr, bestThirdsTeam
  * Berechnet den gesamten simulierten Turnierbaum-Verlauf und sichert ihn in der DB
  */
 export async function updateKOPrognosisDB(playerId, phId, koData, currentTips, context) {
+  
+  // ==========================================================================
+  // REPARATUR-BLOCK: Konvertiert ein flaches Text-Array ["Kroatien"] 
+  // automatisch in die erwartete Objekt-Struktur [{ team: "Kroatien", group: "L" }]
+  // ==========================================================================
+  if (context && Array.isArray(context.thirdPlaces) && context.thirdPlaces.length > 0) {
+    if (typeof context.thirdPlaces[0] === 'string') {
+      context.thirdPlaces = context.thirdPlaces.map(teamName => {
+        let foundGroup = "?";
+        if (context.groups) {
+          for (const [groupLetter, teams] of Object.entries(context.groups)) {
+            if (Array.isArray(teams) && teams.includes(teamName)) {
+              foundGroup = groupLetter;
+              break;
+            }
+            if (Array.isArray(teams) && teams.some(t => t?.team === teamName)) {
+              foundGroup = groupLetter;
+              break;
+            }
+          }
+        }
+        return { team: teamName, group: foundGroup };
+      });
+    }
+  }
+  // ==========================================================================
+
   const currentId = Number(phId);
 
   const getWinner = (matchId, currentTips) => {
