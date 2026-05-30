@@ -89,7 +89,7 @@ const Dashboard = ({ player, onLogout }) => {
         const userTotal = allPoints
           .filter(entry => Number(entry.player_id) === Number(p.id))
           .reduce((sum, entry) => sum + Number(entry.points_total), 0) || 0;
-        return { ...p, points: userTotal };
+        return { ...p, points: parseFloat(userTotal.toFixed(1)) };
       });
       calculatedRanking.sort((a, b) => b.points - a.points);
 
@@ -98,7 +98,7 @@ const Dashboard = ({ player, onLogout }) => {
         const prevTotal = allPoints
           .filter(entry => Number(entry.player_id) === Number(p.id) && !lastMatchdayMatchIds.includes(entry.match_id))
           .reduce((sum, entry) => sum + Number(entry.points_total), 0) || 0;
-        return { id: p.id, points: prevTotal };
+        return { id: p.id, points: parseFloat(prevTotal.toFixed(1)) };
       });
       previousRanking.sort((a, b) => b.points - a.points);
 

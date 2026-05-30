@@ -9,27 +9,41 @@ export const POINTS_CONFIG = {
   BONUS_EXACT_MID: 4,
   BONUS_EXACT_HIGH: 5,
 
-  PROG_REACH_16: 16.1,
-  PROG_OUT_16: 16.2,
-  PROG_REACH_8: 8.1,
-  PROG_OUT_8: 8.2,
-  PROG_REACH_4: 4.1,
-  PROG_OUT_4: 4.2,
-  PROG_REACH_2: 2.1,
-  PROG_OUT_2: 2.2,
-  PROG_REACH_FINAL: 20.1, 
-  PROG_PLACE_4: 4.3,      
-  PROG_PLACE_3: 3.3,      
-  PROG_VIZE: 2.3,         
-  PROG_CHAMPION: 1.3,     
+  // KO-Runde der letzten 32
+  PROG_REACH_16: 4,       // Leichtes Weiterkommen aus der Gruppe
+  PROG_OUT_16: 8,         // Ausscheiden in der Runde der 32
+  
+  // Achtelfinale (Dein 1,5x Verhältnis: 12 zu 8)
+  PROG_REACH_8: 12,       // Einzug ins Achtelfinale
+  PROG_OUT_8: 16,         // Ausscheiden im Achtelfinale
+  
+  // Viertelfinale (Nächster Schritt)
+  PROG_REACH_4: 24,       // Einzug ins Viertelfinale
+  PROG_OUT_4: 28,         // Ausscheiden im Viertelfinale
+  
+  // Halbfinale & Die Final-Four-Plätze
+  PROG_REACH_2: 36,       // Einzug ins Halbfinale
+  PROG_PLACE_4: 40,       // NEU: Exakt 4. Platz geworden
+  PROG_PLACE_3: 46,       // NEU: Exakt 3. Platz geworden
+  
+  // Das große Finale
+  PROG_REACH_FINAL: 50,   // Einzug ins Finale
+  PROG_VIZE: 60,          // Vize-Weltmeister
+  PROG_CHAMPION: 72,      // Weltmeister (6x ein perfekter Volltreffer!)
 
-  PROG_OUT_VORRUNDE: 2.2,
-  PROG_TABLE_POS: 2.5,
+  // Gruppenphase & Tabellen
+  PROG_OUT_VORRUNDE: 6,   
+  PROG_TABLE_POS: 6,      // Fester Wert für exakten Tabellenplatz
 
-  BONUS_QUESTION_BASE: 20, // Basis-Punkte für Bonusfragen
+  BONUS_QUESTION_BASE: 20, 
 
+  // Die mathematische Bremse für späte Phasen
   DIVISORS: {
-    1: 1, 2: 1, 3: 1, 4: 1, 5: 1
+    1: 1.0, 
+    2: 1.5, 
+    3: 2.0, 
+    4: 3.0, 
+    5: 4.0
   }
 };
 
@@ -119,10 +133,22 @@ export const calculateDetailedMatchPoints = (tip, actual, winnerPoints) => {
 };
 
 // --- HELPER: DYNAMISCHE TENDENZ-PUNKTE ---
-export const getDynamicWinnerPoints = (rankA, rankB) => {
+export const getDynamicWinnerPoints = (rankA, rankB, actualWinner) => {
+  // Wenn Unentschieden, Standard-Punkte (4)
+  if (actualWinner === "0") return 4;
+
   const diff = rankA - rankB; 
-  if (diff < -20) return 3; 
-  if (diff > 20) return 5;   
+
+  if (actualWinner === "1") {
+    // Team A hat gewonnen. War Team A der Außenseiter? (z.B. Rang 80 vs Rang 5 -> diff = 75)
+    if (diff > 20) return 5;  // Außenseiter-Sieg bringt mehr Punkte
+    if (diff < -20) return 3; // Favoriten-Sieg bringt weniger Punkte
+  } else if (actualWinner === "2") {
+    // Team B hat gewonnen. War Team B der Außenseiter? (z.B. Rang 5 vs Rang 80 -> diff = -75)
+    if (diff < -20) return 5; 
+    if (diff > 20) return 3;
+  }
+
   return 4; 
 };
 
@@ -182,8 +208,16 @@ export async function processStandardMatchTips(currentMatch, phaseId) {
 
     const rankA = teams?.find(t => t.name === currentMatch.team_a)?.fifa_rank || 50;
     const rankB = teams?.find(t => t.name === currentMatch.team_b)?.fifa_rank || 50;
-    winnerPoints = getDynamicWinnerPoints(rankA, rankB);
-    console.log(`[DEBUG-MATCH-TIPS] Dynamische Winner-Points für Match #${mId}: ${winnerPoints} Pkt. (Ränge: ${rankA} vs ${rankB})`);
+
+    // 1. Realen Ausgang des Spiels ermitteln ("1" = Team A, "2" = Team B, "0" = Unentschieden)
+    const actualWinner = currentMatch.goals_a_real > currentMatch.goals_b_real 
+      ? "1" 
+      : currentMatch.goals_a_real < currentMatch.goals_b_real ? "2" : "0";
+
+    // 2. Den Ausgang an die Hilfsfunktion übergeben
+    winnerPoints = getDynamicWinnerPoints(rankA, rankB, actualWinner);
+    
+    console.log(`[DEBUG-MATCH-TIPS] Dynamische Winner-Points für Match #${mId}: ${winnerPoints} Pkt. (Ränge: ${rankA} vs ${rankB}, Ausgang: ${actualWinner})`);
   }
 
   // Pre-loading für Halbfinal-Konstellationen bei Finalspielen
@@ -696,28 +730,77 @@ function createPointEntry(playerId, category, points, team, phase, groupName, ma
   if (category === "GROUP_RANK") {
     detailDesc = `Richtige Gruppenplatzierung von ${team} in Phase ${phase}`;
   } else if (category === "PROGNOSIS_PATH") {
+    // Falls die Punkte durch einen Divisor geteilt wurden, nutzen wir den unverfälschten Originalwert
     const originalPoints = extra.original || points;
-    const decimal = Math.round((originalPoints * 10) % 10); 
 
-    if (decimal === 1) {
-      if (originalPoints >= 20) detailDesc = `${team} erreicht das Finale`;
-      else if (originalPoints >= 16) detailDesc = `${team} erreicht das Sechzehntelfinale`; 
-      else if (originalPoints >= 8) detailDesc = `${team} erreicht das Achtelfinale`;
-      else if (originalPoints >= 4) detailDesc = `${team} erreicht das Viertelfinale`;
-      else if (originalPoints >= 2) detailDesc = `${team} erreicht das Halbfinale`;
-    } else if (decimal === 2) {
-      detailDesc = `${team} scheidet korrekterweise aus`;
-    } else if (decimal === 3) {
-      if (originalPoints === POINTS_CONFIG.PROG_CHAMPION) detailDesc = `${team} ist Turniersieger 🎉`;
-      else if (originalPoints === POINTS_CONFIG.PROG_VIZE) detailDesc = `${team} ist Vize-Meister`;
-      else if (originalPoints === POINTS_CONFIG.PROG_PLACE_3) detailDesc = `${team} holt Platz 3`;
-      else if (originalPoints === POINTS_CONFIG.PROG_PLACE_4) detailDesc = `${team} beendet das Turnier auf Platz 4`;
+    switch (originalPoints) {
+      case POINTS_CONFIG.PROG_REACH_16:
+        detailDesc = `${team} erreicht das Sechzehntelfinale`;
+        break;
+      case POINTS_CONFIG.PROG_OUT_VORRUNDE:
+        detailDesc = `${team} scheidet in der Vorrunde aus`;
+        break;
+      case POINTS_CONFIG.PROG_OUT_16:
+        detailDesc = `${team} scheidet in der Runde der 32 aus`;
+        break;
+      case POINTS_CONFIG.PROG_REACH_8:
+        detailDesc = `${team} erreicht das Achtelfinale`;
+        break;
+      case POINTS_CONFIG.PROG_OUT_8:
+        detailDesc = `${team} scheidet im Achtelfinale aus`;
+        break;
+      case POINTS_CONFIG.PROG_REACH_4:
+        detailDesc = `${team} erreicht das Viertelfinale`;
+        break;
+      case POINTS_CONFIG.PROG_OUT_4:
+        detailDesc = `${team} scheidet im Viertelfinale aus`;
+        break;
+      case POINTS_CONFIG.PROG_REACH_2:
+        detailDesc = `${team} erreicht das Halbfinale`;
+        break;
+      case POINTS_CONFIG.PROG_PLACE_4:
+        detailDesc = `${team} beendet das Turnier auf Platz 4`;
+        break;
+      case POINTS_CONFIG.PROG_PLACE_3:
+        detailDesc = `${team} holt Platz 3`;
+        break;
+      case POINTS_CONFIG.PROG_REACH_FINAL:
+        detailDesc = `${team} erreicht das Finale`;
+        break;
+      case POINTS_CONFIG.PROG_VIZE:
+        detailDesc = `${team} ist Vize-Meister`;
+        break;
+      case POINTS_CONFIG.PROG_CHAMPION:
+        detailDesc = `${team} ist Turniersieger 🎉`;
+        break;
+      default:
+        // Dynamischer Fallback über die mitgegebenen Runden-Infos aus dem KO-Mapping
+        if (extra.roundName) {
+          detailDesc = extra.isWinner 
+            ? `${team} zieht weiter ein (${extra.roundName})` 
+            : `${team} scheidet aus (${extra.roundName})`;
+        }
+        break;
     }
   }
 
   return {
-    player_id: playerId, category, points_total: points, reference_team: team, phase_id: phase, 
-    group_name: groupName || "KO", is_prognosis: true, match_id: matchId, match_order: matchOrder, matchday: matchday, 
-    breakdown: { info: `${typeLabel}: ${team}`, descr: detailDesc, team, originalPoints: extra.original || points, divisor: extra.divisor || 1 }
+    player_id: playerId, 
+    category, 
+    points_total: points, 
+    reference_team: team, 
+    phase_id: phase, 
+    group_name: groupName || "KO", 
+    is_prognosis: true, 
+    match_id: matchId, 
+    match_order: matchOrder, 
+    matchday: matchday, 
+    breakdown: { 
+      info: `${typeLabel}: ${team}`, 
+      descr: detailDesc, 
+      team, 
+      originalPoints: extra.original || points, 
+      divisor: extra.divisor || 1 
+    }
   };
 }
