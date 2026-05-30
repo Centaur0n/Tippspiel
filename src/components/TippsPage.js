@@ -324,10 +324,22 @@ function TippsPage({ player, phaseId }) {
   }
 
   async function resetOption(optId) {
-    if (isReadOnly) return; 
-    await supabase.from("tip_final_matrix").delete().eq("player_id", player.id).in("matrix_key", [`OPT${optId}_F`, `OPT${optId}_S3`]);
-    fetchTips();
-  }
+  if (isReadOnly) return; 
+
+  // 1. Lokalen State sofort säubern, um Race Conditions mit dem useEffect zu verhindern
+  setTips(prev => {
+    const next = { ...prev };
+    delete next[`OPT${optId}_F`];
+    delete next[`OPT${optId}_S3`];
+    return next;
+  });
+
+  // 2. In der Datenbank löschen
+  await supabase.from("tip_final_matrix").delete().eq("player_id", player.id).in("matrix_key", [`OPT${optId}_F`, `OPT${optId}_S3`]);
+  
+  // 3. Erst danach neu laden zur finalen Synchronisation
+  fetchTips();
+}
 
   const currentSpacing = phase ? (PHASE_SPACING[phase.id] || 70) : 70;
   const startIdxOfPhase = phase ? (phase.id <= 2 ? 0 : phase.id - 2) : 0;
