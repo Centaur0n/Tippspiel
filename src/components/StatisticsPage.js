@@ -13,6 +13,7 @@ const StatisticsPage = ({ currentUserId }) => {
     async function fetchStatsData() {
       setLoading(true);
       try {
+        // Logik-Prüfung: supported_country wird hier korrekt selektiert und steht im player-Objekt bereit
         const [pointsRes, playersRes] = await Promise.all([
           supabase.from("user_points_detail").select("*"),
           supabase.from("player").select("id, name, display_name, name_color, jersey_number, supported_country")
@@ -44,8 +45,9 @@ const StatisticsPage = ({ currentUserId }) => {
         prognosisPointsOnly: 0,   // Nur Prognosepunkte
         perfectHits: 0,           // Volltreffer (Exaktes Ergebnis)
         pointsPerPhase: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
-        pointsPerMatchday: {},    // Punkte, die REIN an diesem Spieltag gemacht wurden { 1: X, 2: Y... }
-        rankHistory: {}           // Der Rang des Spielers am Ende dieses Spieltags { 1: Rang, 2: Rang... }
+        pointsPerMatchday: {},    // Alle Punkte (Matches + Prognosen), die diesem Tag zugeordnet sind
+        prognosisPointsPerPhase: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }, // Prognosepunkte ohne expliziten Spieltag
+        rankHistory: {}           // Der Rang des Spielers am Ende dieses Spieltags
       };
     });
 
@@ -66,17 +68,17 @@ const StatisticsPage = ({ currentUserId }) => {
       const pts = Number(row.points_total) || 0;
       playerStatsMap[pId].totalPoints += pts;
 
+      // Unabhängig von MATCH/PROGNOSIS: Wenn ein konkreter Spieltag gesetzt ist, dorthin buchen
+      if (row.matchday !== undefined && row.matchday !== null && row.matchday !== "") {
+        const mDay = row.matchday;
+        if (!playerStatsMap[pId].pointsPerMatchday[mDay]) {
+          playerStatsMap[pId].pointsPerMatchday[mDay] = 0;
+        }
+        playerStatsMap[pId].pointsPerMatchday[mDay] += pts;
+      }
+
       if (row.category === "MATCH") {
         playerStatsMap[pId].matchPointsOnly += pts;
-        
-        // Spieltags-Punkte zuweisen
-        if (row.matchday !== undefined && row.matchday !== null && row.matchday !== "") {
-          const mDay = row.matchday;
-          if (!playerStatsMap[pId].pointsPerMatchday[mDay]) {
-            playerStatsMap[pId].pointsPerMatchday[mDay] = 0;
-          }
-          playerStatsMap[pId].pointsPerMatchday[mDay] += pts;
-        }
 
         // Volltreffer ermitteln aus dem JSON-Breakdown
         if (row.breakdown && 
@@ -88,6 +90,13 @@ const StatisticsPage = ({ currentUserId }) => {
         }
       } else {
         playerStatsMap[pId].prognosisPointsOnly += pts;
+        
+        // Wenn kein expliziter Spieltag da ist, aber eine Phase, separat für den Verlauf tracken
+        if ((row.matchday === undefined || row.matchday === null || row.matchday === "") && row.phase_id) {
+          if (playerStatsMap[pId].prognosisPointsPerPhase[row.phase_id] !== undefined) {
+            playerStatsMap[pId].prognosisPointsPerPhase[row.phase_id] += pts;
+          }
+        }
       }
 
       if (row.phase_id && playerStatsMap[pId].pointsPerPhase[row.phase_id] !== undefined) {
@@ -97,27 +106,41 @@ const StatisticsPage = ({ currentUserId }) => {
 
     const allStatsList = Object.values(playerStatsMap);
 
+    // Richtwerte: Ab welchem Spieltag gelten Prognosen einer Phase als abgerechnet/sichtbar?
+    const phaseEndMatchday = {
+      1: 3, // Gruppenphasen-Prognosen zählen ab Spieltag 3 in den Verlauf
+      2: 4, // Achtelfinale
+      3: 5, // Viertelfinale
+      4: 6, // Halbfinale
+      5: 7  // Finale
+    };
+
     // 3. Zeitverlauf & Spieltagssieger berechnen (On-the-fly Snapshot)
     const matchdayWinners = {};
     
     matchdays.forEach(day => {
-      // Snapshot-Tabelle für diesen spezifischen Spieltag bauen
       const dayStandings = allStatsList.map(p => {
-        // Summiere alle Spieltagspunkte von Tag 1 bis zum aktuellen 'day'
-        let accumulatedMatchPoints = 0;
+        let accumulatedPointsAtMilestone = 0;
+
+        // 1. Alle Punkte von Spieltag 1 bis zum aktuellen 'day' aufsummieren
         matchdays.forEach(d => {
           if (Number(d) <= Number(day)) {
-            accumulatedMatchPoints += (p.pointsPerMatchday[d] || 0);
+            accumulatedPointsAtMilestone += (p.pointsPerMatchday[d] || 0);
           }
         });
 
-        // Gesamtrang inklusive der Prognosepunkte zu diesem Zeitpunkt
-        const totalPointsAtThisMilestone = accumulatedMatchPoints + p.prognosisPointsOnly;
+        // 2. Nur Prognosen dazuzählen, deren Phase an diesem Spieltag bereits abgeschlossen/gültig ist
+        Object.keys(p.prognosisPointsPerPhase).forEach(phaseId => {
+          const targetDay = phaseEndMatchday[phaseId] || 99;
+          if (Number(day) >= targetDay) {
+            accumulatedPointsAtMilestone += p.prognosisPointsPerPhase[phaseId];
+          }
+        });
 
         return {
           id: p.id,
           pointsOnThisDay: p.pointsPerMatchday[day] || 0,
-          totalAtMilestone: totalPointsAtThisMilestone
+          totalAtMilestone: accumulatedPointsAtMilestone
         };
       });
 
@@ -127,7 +150,7 @@ const StatisticsPage = ({ currentUserId }) => {
         playerStatsMap[entry.id].rankHistory[day] = index + 1;
       });
 
-      // Spieltagssieger ermitteln (Wer hat REIN AM DIESEM TAG am meisten gepunktet?)
+      // Spieltagssieger ermitteln (Wer hat REIN AN DIESEM TAG am meisten gepunktet?)
       dayStandings.sort((a, b) => b.pointsOnThisDay - a.pointsOnThisDay);
       const topScorer = dayStandings[0];
       matchdayWinners[day] = {
@@ -176,6 +199,29 @@ const StatisticsPage = ({ currentUserId }) => {
     };
   }, [pointsData, players, currentUserId]);
 
+  // --- VISUELLER HELPER FÜR SPIELER-PROFILEDETAILS ---
+  const renderPlayerWithAssets = (player, isMe = false, badge = null) => {
+    if (!player) return null;
+    return (
+      <div style={{ display: "inline-flex", alignItems: "center", gap: "10px", verticalAlign: "middle" }}>
+        {/* Validierung: Flagge rendern, falls supported_country existiert und kein Leerstring ist */}
+        {player.supported_country && player.supported_country.trim() !== "" && (
+          <FlagIcon teamName={player.supported_country} style={{ width: "20px", height: "auto", borderRadius: "2px", boxShadow: "0 1px 2px rgba(0,0,0,0.1)" }} />
+        )}
+        {player.jersey_number !== undefined && player.jersey_number !== null && (
+          <div style={{ transform: "scale(0.85)", display: "inline-block", margin: "0 -4px" }}>
+            <RetroJersey number={player.jersey_number} color={player.name_color || "#2563eb"} />
+          </div>
+        )}
+        <span style={{ fontWeight: "600", color: player.name_color || "#1e293b" }}>
+          {player.displayName}
+          {isMe && <span style={{ color: "#64748b", fontWeight: "normal", fontSize: "0.85rem" }}> (Du)</span>}
+          {badge && <span style={{ marginLeft: "6px" }}>{badge}</span>}
+        </span>
+      </div>
+    );
+  };
+
   if (loading) {
     return <div style={{ padding: "20px", color: "#4b5563", textAlign: "center" }}>Statistik-Zentrale wird berechnet...</div>;
   }
@@ -202,7 +248,7 @@ const StatisticsPage = ({ currentUserId }) => {
       </h2>
 
       {/* --- REITER-NAVIGATION --- */}
-      <div style={{ display: "flex", gap: "8px", borderBottom: "2px solid #e2e8f0", marginBottom: "24px", overflowX: "auto", pb: "4px" }}>
+      <div style={{ display: "flex", gap: "8px", borderBottom: "2px solid #e2e8f0", marginBottom: "24px", overflowX: "auto", paddingBottom: "4px" }}>
         {[
           { id: "highlights", label: "🌟 Meine Highlights", color: "#2563eb" },
           { id: "thron", label: "🏆 Die Thronsäle", color: "#16a34a" },
@@ -246,7 +292,7 @@ const StatisticsPage = ({ currentUserId }) => {
             <div style={cardStyle}>
               <p style={cardLabelStyle}>Punkte durch Spiel-Tipps</p>
               <h3 style={{ ...cardValueStyle, color: "#2563eb" }}>{stats.myStats.matchPointsOnly} Pkt</h3>
-              <p style={cardSubStyle}>Globale Durchschnitt: {stats.avgMatchPoints.toFixed(1)}</p>
+              <p style={cardSubStyle}>Globaler Durchschnitt: {stats.avgMatchPoints.toFixed(1)}</p>
             </div>
             <div style={cardStyle}>
               <p style={cardLabelStyle}>Punkte durch Prognosen</p>
@@ -264,7 +310,7 @@ const StatisticsPage = ({ currentUserId }) => {
 
               return (
                 <div key={phase} style={{ marginBottom: "14px" }}>
-                  <div style={{ display: "flex", justifyContent: "between", fontSize: "0.88rem", fontWeight: "600", color: "#475569", marginBottom: "4px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.88rem", fontWeight: "600", color: "#475569", marginBottom: "4px" }}>
                     <span>Phase {phase}</span>
                     <span style={{ marginLeft: "auto" }}>{userPts} Pkt (Bestwert: {maxPhasePoints})</span>
                   </div>
@@ -297,9 +343,12 @@ const StatisticsPage = ({ currentUserId }) => {
                 <tbody>
                   {stats.rankingPerfectHits.slice(0, 5).map((player, idx) => (
                     <tr key={player.id} style={getRowStyle(player.id)}>
-                      <td style={{ padding: "8px", fontWeight: "700" }}>{idx + 1}.</td>
-                      <td style={{ padding: "8px", fontWeight: "600", color: player.name_color || "#0f172a" }}>{player.displayName}</td>
-                      <td style={{ padding: "8px", textAlign: "right", fontWeight: "700", color: "#16a34a" }}>{player.perfectHits}</td>
+                      {/* Korrektur: color hinzugefügt, um weiße Zahlen zu verhindern */}
+                      <td style={{ padding: "8px", fontWeight: "700", verticalAlign: "middle", color: "#1f2937" }}>{idx + 1}.</td>
+                      <td style={{ padding: "8px", verticalAlign: "middle" }}>
+                        {renderPlayerWithAssets(player)}
+                      </td>
+                      <td style={{ padding: "8px", textAlign: "right", fontWeight: "700", color: "#16a34a", verticalAlign: "middle" }}>{player.perfectHits}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -316,10 +365,10 @@ const StatisticsPage = ({ currentUserId }) => {
                   return (
                     <div key={phase} style={{ display: "flex", alignItems: "center", padding: "10px", backgroundColor: isMeWinner ? "#eff6ff" : "#f8fafc", borderRadius: "8px", border: isMeWinner ? "1px solid #3b82f6" : "1px solid #e2e8f0" }}>
                       <span style={{ fontWeight: "700", color: "#475569", width: "70px" }}>Phase {phase}:</span>
-                      <span style={{ fontWeight: "600", color: item.winner?.name_color || "#1e293b" }}>
-                        {item.winner?.displayName} {isMeWinner && "⭐"}
-                      </span>
-                      <span style={{ marginLeft: "auto", fontWeight: "700", color: "#2563eb" }}>{item.points} Pkt</span>
+                      <div style={{ flex: 1 }}>
+                        {renderPlayerWithAssets(item.winner, false, isMeWinner ? "⭐" : null)}
+                      </div>
+                      <span style={{ fontWeight: "700", color: "#2563eb", marginLeft: "auto" }}>{item.points} Pkt</span>
                     </div>
                   );
                 })}
@@ -327,23 +376,23 @@ const StatisticsPage = ({ currentUserId }) => {
             </div>
           </div>
 
-          {/* NEU: Die Spieltags-Könige */}
+          {/* Die Spieltags-Könige */}
           <div style={cardStyle}>
             <h4 style={{ margin: "0 0 14px 0", color: "#1f2937" }}>🏅 Die Spieltags-Könige (Meiste Punkte am Spieltag)</h4>
             {stats.matchdays.length === 0 ? (
               <p style={{ fontSize: "0.9rem", color: "#64748b", margin: 0 }}>Noch keine Spieltagsdaten vorhanden.</p>
             ) : (
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "12px" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "12px" }}>
                 {stats.matchdays.map(day => {
                   const data = stats.matchdayWinners[day];
                   const isMeWinner = Number(data.winner?.id) === Number(currentUserId);
                   return (
                     <div key={day} style={{ padding: "12px", backgroundColor: isMeWinner ? "#f0fdf4" : "#f8fafc", borderRadius: "8px", border: isMeWinner ? "1px solid #22c55e" : "1px solid #e2e8f0" }}>
-                      <div style={{ fontSize: "0.8rem", fontWeight: "700", color: "#64748b", marginBottom: "4px" }}>SPIELTAG {day}</div>
-                      <div style={{ fontWeight: "600", color: data.winner?.name_color || "#1e293b", fontSize: "0.95rem" }}>
-                        {data.winner ? data.winner.displayName : "Niemand"} {isMeWinner && "👑"}
+                      <div style={{ fontSize: "0.8rem", fontWeight: "700", color: "#64748b", marginBottom: "6px" }}>SPIELTAG {day}</div>
+                      <div>
+                        {data.winner ? renderPlayerWithAssets(data.winner, false, isMeWinner ? "👑" : null) : <span style={{ color: "#94a3b8" }}>Niemand</span>}
                       </div>
-                      <div style={{ fontSize: "0.85rem", fontWeight: "700", color: "#16a34a", marginTop: "2px" }}>{data.points} Punkte</div>
+                      <div style={{ fontSize: "0.85rem", fontWeight: "700", color: "#16a34a", marginTop: "6px" }}>{data.points} Punkte</div>
                     </div>
                   );
                 })}
@@ -380,14 +429,15 @@ const StatisticsPage = ({ currentUserId }) => {
 
                   return (
                     <tr key={player.id} style={getRowStyle(player.id)}>
-                      <td style={{ ...tdStyle, fontWeight: "700" }}>{idx + 1}.</td>
-                      <td style={{ ...tdStyle, fontWeight: "600", color: player.name_color || "#1e293b" }}>
-                        {player.displayName} {isMe && " (Du)"}
+                      {/* Korrektur: color hinzugefügt, um weiße Zahlen zu verhindern */}
+                      <td style={{ ...tdStyle, fontWeight: "700", color: "#1f2937" }}>{idx + 1}.</td>
+                      <td style={tdStyle}>
+                        {renderPlayerWithAssets(player, isMe)}
                       </td>
                       <td style={{ ...tdStyle, textAlign: "right", fontWeight: "700", color: "#2563eb" }}>
                         {player.matchPointsOnly} Pkt
                       </td>
-                      <td style={{ ...tdStyle, textAlign: "right", fontWeight: "500" }}>
+                      <td style={{ ...tdStyle, textAlign: "right", fontWeight: "500", color: "#334155" }}>
                         {realRank}. {diff > 0 ? (
                           <span style={{ color: "#16a34a", fontSize: "0.8rem" }}>↑+{diff}</span>
                         ) : diff < 0 ? (
@@ -409,7 +459,7 @@ const StatisticsPage = ({ currentUserId }) => {
       {activeTab === "trends" && (
         <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
           
-          {/* NEU: Der historische Rangverlauf als interaktive Matrix-Tabelle */}
+          {/* Platzierungs-Verlauf als interaktive Matrix-Tabelle */}
           <div style={cardStyle}>
             <h4 style={{ margin: "0 0 6px 0", color: "#1f2937" }}>📈 Platzierungs-Verlauf nach Spieltagen</h4>
             <p style={{ margin: "0 0 16px 0", fontSize: "0.85rem", color: "#64748b" }}>Hier siehst du, wie sich die Ränge der Mitspieler nach jedem abgeschlossenen Spieltag verschoben haben.</p>
@@ -430,8 +480,11 @@ const StatisticsPage = ({ currentUserId }) => {
                     const isMe = Number(player.id) === Number(currentUserId);
                     return (
                       <tr key={player.id} style={getRowStyle(player.id)}>
-                        <td style={{ ...tdStyle, fontWeight: "700" }}>{idx + 1}.</td>
-                        <td style={{ ...tdStyle, fontWeight: "600", color: player.name_color || "#1e293b" }}>{player.displayName}</td>
+                        {/* Korrektur: color hinzugefügt, um weiße Zahlen zu verhindern */}
+                        <td style={{ ...tdStyle, fontWeight: "700", color: "#1f2937" }}>{idx + 1}.</td>
+                        <td style={tdStyle}>
+                          {renderPlayerWithAssets(player, isMe)}
+                        </td>
                         {stats.matchdays.map(day => {
                           const historyRank = player.rankHistory[day] || "-";
                           return (
@@ -464,9 +517,9 @@ const StatisticsPage = ({ currentUserId }) => {
 
                 return (
                   <div key={player.id} style={{ padding: "8px", borderRadius: "8px", backgroundColor: isMe ? "#eff6ff" : "transparent", borderLeft: isMe ? "4px solid #2563eb" : "4px solid transparent" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.88rem", marginBottom: "4px", fontWeight: isMe ? "700" : "500" }}>
-                      <span style={{ color: player.name_color || "#1e293b" }}>{player.displayName} {isMe && " (Du)"}</span>
-                      <span style={{ marginLeft: "auto", color: "#475569" }}>{player.totalPoints} Gesamt-Pkt</span>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.88rem", marginBottom: "6px" }}>
+                      {renderPlayerWithAssets(player, isMe)}
+                      <span style={{ marginLeft: "auto", color: "#475569", fontWeight: "700" }}>{player.totalPoints} Gesamt-Pkt</span>
                     </div>
                     <div style={{ width: "100%", height: "16px", backgroundColor: "#f1f5f9", borderRadius: "4px", overflow: "hidden", display: "flex" }}>
                       <div style={{ width: `${matchPct}%`, backgroundColor: "#2563eb", height: "100%", transition: "width 0.5s" }} title={`Tipps: ${player.matchPointsOnly} Pkt`} />
@@ -493,7 +546,7 @@ const cardStyle = {
   boxShadow: "0 1px 3px 0 rgba(0, 0, 0, 0.05)"
 };
 
-const cardLabelStyle = { margin: 0, fontSize: "0.85rem", fontWeight: "600", color: "#64748b", uppercase: "true" };
+const cardLabelStyle = { margin: 0, fontSize: "0.85rem", fontWeight: "600", color: "#64748b", textTransform: "uppercase" };
 const cardValueStyle = { margin: "8px 0", fontSize: "1.8rem", fontWeight: "700" };
 const cardSubStyle = { margin: 0, fontSize: "0.8rem", color: "#94a3b8" };
 

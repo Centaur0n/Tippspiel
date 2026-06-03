@@ -14,10 +14,17 @@ function App() {
   const [error, setError] = useState("");
   const [loggedIn, setLoggedIn] = useState(false);
 
-  // --- 2. INITIALES LADEN ---
+  // --- 2. INITIALES LADEN (JETZT MIT GEFESTIGTER SORTIERUNG) ---
   useEffect(() => {
     async function loadPlayers() {
-      const { data } = await supabase.from("player").select("*");
+      // 🌟 HIER IST DIE RETTUNG: .order("id", { ascending: true })
+      // Das sorgt dafür, dass die Spieler IMMER in derselben Reihenfolge geladen werden.
+      // Kein Suchen mehr am nächsten Tag!
+      const { data } = await supabase
+        .from("player")
+        .select("*")
+        .order("id", { ascending: true }); 
+      
       setPlayers(data || []);
     }
     loadPlayers();
@@ -41,7 +48,6 @@ function App() {
   };
 
   // --- 4. ABWECHSELNDE TAKTISCHE FORMATIONEN ---
-  // Die Koordinaten sind jetzt exakt verschachtelt: 1x Links, 1x Rechts...
   const alternatingPositions = [
     { left: "6%", top: "50%" },   // 1. Spieler: Team Links (TW)
     { left: "94%", top: "50%" },  // 2. Spieler: Team Rechts (TW)
@@ -77,7 +83,6 @@ function App() {
     { left: "52%", top: "50%" }   // 22. Spieler: Team Rechts (ST)
   ];
 
-  // Aufteilung: Die ersten 22 gehen aufs Feld, der Rest auf die Bank
   const pitchPlayers = players.slice(0, 22);
   const benchPlayers = players.slice(22);
 
@@ -103,7 +108,7 @@ function App() {
                 <div style={rightPenaltyBoxStyle} />
                 <div style={rightGoalBoxStyle} />
 
-                {/* Sgpielfeld-Akteure */}
+                {/* Spielfeld-Akteure */}
                 {pitchPlayers.map((p, index) => {
                   const coords = alternatingPositions[index];
                   return (
@@ -132,10 +137,10 @@ function App() {
                 })}
               </div>
 
-              {/* DYNAMISCHE AUSWECHSELBANK (Wird nur gerendert, wenn > 22 Spieler vorhanden sind) */}
+              {/* DYNAMISCHE AUSWECHSELBANK */}
               {benchPlayers.length > 0 && (
                 <div style={benchContainerStyle}>
-                  <h3 style={benchTitleStyle}>🪑 Auswechselbank ({benchPlayers.length})</h3>
+                  <h3 style={benchTitleStyle}>Fankurve ({benchPlayers.length})</h3>
                   <div style={benchGridStyle}>
                     {benchPlayers.map((p) => (
                       <button
@@ -161,7 +166,7 @@ function App() {
               )}
             </div>
           ) : (
-            // SCHRITT 2: PIN-Eingabe
+            // SCHRITT 2: PIN-Eingabe (Spielfeld blendet komplett aus)
             <section style={glassPinCardStyle}>
               <h3 style={{ marginTop: 0, color: "#ffffff", fontSize: "1.3rem" }}>
                 Hallo, {selectedPlayer.display_name || selectedPlayer.name}
@@ -194,7 +199,6 @@ function App() {
 }
 
 // --- 🟢 STYLES ---
-
 const appContainerStyle = { 
   fontFamily: "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif", 
   minHeight: "100vh",
@@ -248,7 +252,6 @@ const pitchContainerStyle = {
   overflow: "hidden"
 };
 
-// --- WEISSE SPIELFELDLINIEN ---
 const lineColor = "rgba(255, 255, 255, 0.22)";
 
 const midlineStyle = {
@@ -270,7 +273,6 @@ const rightGoalBoxStyle = {
   position: "absolute", right: 0, top: "33%", width: "5.5%", height: "34%", border: `2px solid ${lineColor}`, borderRight: "none"
 };
 
-// --- SPIELER BUTTONS (AUF DEM FELD) ---
 const playerTacticalGlassStyle = {
   position: "absolute",
   transform: "translate(-50%, -50%)",
@@ -299,7 +301,6 @@ const playerNameStyle = {
   textShadow: "0 1px 4px rgba(0,0,0,0.6)"
 };
 
-// --- STYLES FÜR DIE AUSWECHSELBANK ---
 const benchContainerStyle = {
   padding: "24px",
   borderTop: "1px solid rgba(255, 255, 255, 0.12)",
@@ -337,7 +338,6 @@ const benchPlayerButtonStyle = {
   minWidth: "110px"
 };
 
-// --- PIN BEREICH ---
 const glassPinCardStyle = {
   backgroundColor: "rgba(255, 255, 255, 0.07)",
   backdropFilter: "blur(20px)",
