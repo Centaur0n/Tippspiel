@@ -47,10 +47,10 @@ const StatisticsPage = ({ currentUserId }) => {
         pointsPerMatchday: {},    // Alle Punkte (Matches + Prognosen), die diesem Tag zugeordnet sind
         prognosisPointsPerPhase: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }, // Prognosepunkte ohne expliziten Spieltag
         rankHistory: {},          // Der Rang des Spielers am Ende dieses Spieltags
-        currentRankReal: 1,       // NEU: Berechneter Echt-Rang unter Berücksichtigung von Gleichständen
-        currentRankMatchOnly: 1,  // NEU: Berechneter Tipp-Rang mit Gleichständen
-        currentRankPerfectHits: 1,// NEU: Berechneter Volltreffer-Rang mit Gleichständen
-        matchdayTrend: 0          // NEU: Platzveränderung zum letzten Spieltag (z.B. +2, -1, 0)
+        currentRankReal: 1,       
+        currentRankMatchOnly: 1,  
+        currentRankPerfectHits: 1,
+        matchdayTrend: 0          
       };
     });
 
@@ -80,7 +80,7 @@ const StatisticsPage = ({ currentUserId }) => {
       }
 
       if (row.category === "MATCH") {
-        row.category === "MATCH" && (playerStatsMap[pId].matchPointsOnly += pts);
+        playerStatsMap[pId].matchPointsOnly += pts;
 
         if (row.breakdown && 
             row.breakdown.tip_a !== undefined && 
@@ -105,10 +105,9 @@ const StatisticsPage = ({ currentUserId }) => {
     });
 
     const allStatsList = Object.values(playerStatsMap);
-
     const phaseEndMatchday = { 1: 3, 2: 4, 3: 5, 4: 6, 5: 7 };
 
-    // 3. Zeitverlauf & Spieltagssieger berechnen (Inklusive Gleichstands-Logik für die Historie!)
+    // 3. Zeitverlauf & Spieltagssieger berechnen
     const matchdayWinners = {};
     
     matchdays.forEach(day => {
@@ -135,24 +134,29 @@ const StatisticsPage = ({ currentUserId }) => {
         };
       });
 
-      // Sortieren nach Gesamtpunkten an diesem Meilenstein
+      // Historische Ränge berechnen
       dayStandings.sort((a, b) => b.totalAtMilestone - a.totalAtMilestone);
-      
-      // LOGIK-ANPASSUNG: Ränge mit Gleichstand vergeben (z.B. zwei 15. Plätze)
       let currentHistRank = 1;
       dayStandings.forEach((entry, index) => {
         if (index > 0 && entry.totalAtMilestone < dayStandings[index - 1].totalAtMilestone) {
-          currentHistRank = index + 1; // Rutscht auf den realen Listenplatz ab
+          currentHistRank = index + 1;
         }
         playerStatsMap[entry.id].rankHistory[day] = currentHistRank;
       });
 
-      // Spieltagssieger ermitteln
-      dayStandings.sort((a, b) => b.pointsOnThisDay - a.pointsOnThisDay);
-      const topScorer = dayStandings[0];
+      // Alle Tagessieger mit exakt gleicher (maximaler) Punktzahl ermitteln
+      const daySortedForWinners = [...dayStandings].sort((a, b) => b.pointsOnThisDay - a.pointsOnThisDay);
+      const maxPointsOnThisDay = daySortedForWinners[0]?.pointsOnThisDay || 0;
+      
+      const winnersOnThisDay = maxPointsOnThisDay > 0
+        ? daySortedForWinners
+            .filter(entry => entry.pointsOnThisDay === maxPointsOnThisDay)
+            .map(entry => playerStatsMap[entry.id])
+        : [];
+
       matchdayWinners[day] = {
-        winner: playerStatsMap[topScorer?.id] || null,
-        points: topScorer?.pointsOnThisDay || 0
+        winners: winnersOnThisDay,
+        points: maxPointsOnThisDay
       };
     });
 
@@ -175,7 +179,11 @@ const StatisticsPage = ({ currentUserId }) => {
       player.currentRankMatchOnly = currentRankMatch;
     });
 
-    const rankingPerfectHits = [...allStatsList].sort((a, b) => b.perfectHits - a.perfectHits);
+    // Spieler mit 0 Volltreffern komplett herausfiltern
+    const rankingPerfectHits = [...allStatsList]
+      .filter(player => player.perfectHits > 0)
+      .sort((a, b) => b.perfectHits - a.perfectHits);
+
     let currentRankPerfect = 1;
     rankingPerfectHits.forEach((player, idx) => {
       if (idx > 0 && player.perfectHits < rankingPerfectHits[idx - 1].perfectHits) {
@@ -184,31 +192,35 @@ const StatisticsPage = ({ currentUserId }) => {
       player.currentRankPerfectHits = currentRankPerfect;
     });
 
-    // LOGIK-ERWEITERUNG: Trend zum vorherigen Spieltag ermitteln
+    // Trend zum vorherigen Spieltag ermitteln
     const latestDay = matchdays[matchdays.length - 1];
     const prevDay = matchdays[matchdays.length - 2];
 
     allStatsList.forEach(p => {
       if (latestDay && prevDay && p.rankHistory[latestDay] !== undefined && p.rankHistory[prevDay] !== undefined) {
-        // Differenz berechnen: Vorheriger Rang minus aktueller Rang.
-        // Wenn vorher Rang 15 und jetzt Rang 13 -> 15 - 13 = +2 Plätze gutgemacht!
         p.matchdayTrend = p.rankHistory[prevDay] - p.rankHistory[latestDay];
       } else {
-        p.matchdayTrend = 0; // Kein Trend verfügbar (z.B. am 1. Spieltag)
+        p.matchdayTrend = 0;
       }
     });
 
-    // Phasen-Gewinner ermitteln
+    // KORREKTUR: Phasen-Gewinner unterstützt jetzt ebenfalls geteilte Plätze bei Gleichstand
     const phaseWinners = {};
     [1, 2, 3, 4, 5].forEach(phase => {
       const sorted = [...allStatsList].sort((a, b) => b.pointsPerPhase[phase] - a.pointsPerPhase[phase]);
+      const maxPhasePoints = sorted[0]?.pointsPerPhase[phase] || 0;
+      
+      const winnersOnThisPhase = maxPhasePoints > 0
+        ? sorted.filter(p => p.pointsPerPhase[phase] === maxPhasePoints)
+        : [];
+      
       phaseWinners[phase] = {
-        winner: sorted[0],
-        points: sorted[0]?.pointsPerPhase[phase] || 0
+        winners: winnersOnThisPhase,
+        points: maxPhasePoints
       };
     });
 
-    // 5. Daten für den angemeldeten Spieler isolieren (Ränge aus den neuen Variablen ziehen)
+    // Daten für den angemeldeten Spieler isolieren
     const myStats = playerStatsMap[currentUserId] || null;
     const myRankActual = myStats ? myStats.currentRankReal : 1;
     const myRankMatchOnly = myStats ? myStats.currentRankMatchOnly : 1;
@@ -396,35 +408,64 @@ const StatisticsPage = ({ currentUserId }) => {
                   </tr>
                 </thead>
                 <tbody>
-                  {stats.rankingPerfectHits.slice(0, 5).map((player) => (
-                    <tr key={player.id} style={getRowStyle(player.id)}>
-                      <td style={{ padding: "8px", fontWeight: "700", verticalAlign: "middle", color: "#1f2937" }}>
-                        {player.currentRankPerfectHits}.
+                  {stats.rankingPerfectHits.length === 0 ? (
+                    <tr>
+                      <td colSpan="3" style={{ padding: "16px", color: "#94a3b8", fontSize: "0.9rem", textAlign: "center" }}>
+                        Noch keine Volltreffer erzielt.
                       </td>
-                      <td style={{ padding: "8px", verticalAlign: "middle" }}>
-                        {renderPlayerWithAssets(player)}
-                      </td>
-                      <td style={{ padding: "8px", textAlign: "right", fontWeight: "700", color: "#16a34a", verticalAlign: "middle" }}>{player.perfectHits}</td>
                     </tr>
-                  ))}
+                  ) : (
+                    stats.rankingPerfectHits.map((player) => (
+                      <tr key={player.id} style={getRowStyle(player.id)}>
+                        <td style={{ padding: "8px", fontWeight: "700", verticalAlign: "middle", color: "#1f2937" }}>
+                          {player.currentRankPerfectHits}.
+                        </td>
+                        <td style={{ padding: "8px", verticalAlign: "middle" }}>
+                          {renderPlayerWithAssets(player, Number(player.id) === Number(currentUserId))}
+                        </td>
+                        <td style={{ padding: "8px", textAlign: "right", fontWeight: "700", color: "#16a34a", verticalAlign: "middle" }}>
+                          {player.perfectHits}
+                        </td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
 
-            {/* Phasen Könige */}
+            {/* Phasen Könige (Unterstützt nun mehrere geteilte Phasensieger sauber untereinander) */}
             <div style={cardStyle}>
               <h4 style={{ margin: "0 0 14px 0", color: "#1f2937" }}>👑 Die Herrscher der Phasen</h4>
               <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                 {[1, 2, 3, 4, 5].map(phase => {
                   const item = stats.phaseWinners[phase];
-                  const isMeWinner = Number(item.winner?.id) === Number(currentUserId);
+                  const hasWinners = item.winners && item.winners.length > 0;
+                  const isMeWinner = item.winners?.some(w => Number(w.id) === Number(currentUserId));
+                  
                   return (
-                    <div key={phase} style={{ display: "flex", alignItems: "center", padding: "10px", backgroundColor: isMeWinner ? "#eff6ff" : "#f8fafc", borderRadius: "8px", border: isMeWinner ? "1px solid #3b82f6" : "1px solid #e2e8f0" }}>
-                      <span style={{ fontWeight: "700", color: "#475569", width: "70px" }}>Phase {phase}:</span>
-                      <div style={{ flex: 1 }}>
-                        {renderPlayerWithAssets(item.winner, false, isMeWinner ? "⭐" : null)}
+                    <div key={phase} style={{ display: "flex", flexDirection: "column", padding: "10px", backgroundColor: isMeWinner ? "#eff6ff" : "#f8fafc", borderRadius: "8px", border: isMeWinner ? "1px solid #3b82f6" : "1px solid #e2e8f0" }}>
+                      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "8px" }}>
+                        <span style={{ fontWeight: "700", color: "#475569", width: "70px", paddingTop: "2px" }}>Phase {phase}:</span>
+                        <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: "6px" }}>
+                          {hasWinners ? (
+                            item.winners.map(winner => {
+                              const isThisMe = Number(winner.id) === Number(currentUserId);
+                              return (
+                                <div key={winner.id}>
+                                  {renderPlayerWithAssets(winner, isThisMe, isThisMe ? "⭐" : null)}
+                                </div>
+                              );
+                            })
+                          ) : (
+                            <span style={{ color: "#94a3b8", fontStyle: "italic", fontSize: "0.85rem", paddingTop: "2px" }}>
+                              Noch kein Phasenbeginn (0 Pkt)
+                            </span>
+                          )}
+                        </div>
+                        <span style={{ fontWeight: "700", color: item.points > 0 ? "#2563eb" : "#94a3b8", textAlign: "right", paddingTop: "2px" }}>
+                          {item.points} Pkt
+                        </span>
                       </div>
-                      <span style={{ fontWeight: "700", color: "#2563eb", marginLeft: "auto" }}>{item.points} Pkt</span>
                     </div>
                   );
                 })}
@@ -438,17 +479,32 @@ const StatisticsPage = ({ currentUserId }) => {
             {stats.matchdays.length === 0 ? (
               <p style={{ fontSize: "0.9rem", color: "#64748b", margin: 0 }}>Noch keine Spieltagsdaten vorhanden.</p>
             ) : (
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "12px" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "12px" }}>
                 {stats.matchdays.map(day => {
                   const data = stats.matchdayWinners[day];
-                  const isMeWinner = Number(data.winner?.id) === Number(currentUserId);
+                  const isMeWinner = data.winners?.some(w => Number(w.id) === Number(currentUserId));
+                  
                   return (
                     <div key={day} style={{ padding: "12px", backgroundColor: isMeWinner ? "#f0fdf4" : "#f8fafc", borderRadius: "8px", border: isMeWinner ? "1px solid #22c55e" : "1px solid #e2e8f0" }}>
                       <div style={{ fontSize: "0.8rem", fontWeight: "700", color: "#64748b", marginBottom: "6px" }}>SPIELTAG {day}</div>
-                      <div>
-                        {data.winner ? renderPlayerWithAssets(data.winner, false, isMeWinner ? "👑" : null) : <span style={{ color: "#94a3b8" }}>Niemand</span>}
+                      
+                      <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                        {data.winners && data.winners.length > 0 ? (
+                          data.winners.map(winner => {
+                            const isThisMe = Number(winner.id) === Number(currentUserId);
+                            return (
+                              <div key={winner.id} style={{ display: "flex", alignItems: "center" }}>
+                                {renderPlayerWithAssets(winner, isThisMe, isThisMe ? "👑" : null)}
+                              </div>
+                            );
+                          })
+                        ) : (
+                          <span style={{ color: "#94a3b8", fontSize: "0.85rem", fontStyle: "italic" }}>Keine Punkte erzielt</span>
+                        )}
                       </div>
-                      <div style={{ fontSize: "0.85rem", fontWeight: "700", color: "#16a34a", marginTop: "6px" }}>{data.points} Punkte</div>
+                      <div style={{ fontSize: "0.85rem", fontWeight: "700", color: "#16a34a", marginTop: "8px", borderTop: "1px dashed #e2e8f0", paddingTop: "4px" }}>
+                        {data.points} Punkte
+                      </div>
                     </div>
                   );
                 })}
@@ -513,8 +569,6 @@ const StatisticsPage = ({ currentUserId }) => {
       {/* ================= REITER 4: SPIELTAGE & VERLAUF ================= */}
       {activeTab === "trends" && (
         <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
-          
-          {/* Platzierungs-Verlauf Matrix-Tabelle */}
           <div style={cardStyle}>
             <h4 style={{ margin: "0 0 6px 0", color: "#1f2937" }}>📈 Platzierungs-Verlauf nach Spieltagen</h4>
             <p style={{ margin: "0 0 16px 0", fontSize: "0.85rem", color: "#64748b" }}>Hier siehst du, wie sich die Ränge der Mitspieler nach jedem abgeschlossenen Spieltag verschoben haben.</p>
@@ -541,7 +595,6 @@ const StatisticsPage = ({ currentUserId }) => {
                         <td style={tdStyle}>
                           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", gap: "12px" }}>
                             {renderPlayerWithAssets(player, isMe)}
-                            {/* Rendert den grünen/roten Pfeil mitsamt der Platzzahl rechts neben dem Profil */}
                             <div style={{ minWidth: "45px", textAlign: "right" }}>
                               {renderTrendArrow(player.matchdayTrend)}
                             </div>
@@ -564,35 +617,6 @@ const StatisticsPage = ({ currentUserId }) => {
               </table>
             </div>
           </div>
-
-          {/* Punkte-Verteilung */}
-          <div style={cardStyle}>
-            <h4 style={{ margin: "0 0 16px 0", color: "#1f2937" }}>📊 Punkte-Vergleich aller Mitspieler</h4>
-            <p style={{ margin: "0 0 20px 0", fontSize: "0.85rem", color: "#64748b" }}>Hier siehst du die Verteilung der Match-Punkte (Blau) vs. Prognose-Punkte (Lila) im direkten, visuellen Stapel-Vergleich.</p>
-            
-            <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-              {stats.rankingReal.map(player => {
-                const total = player.totalPoints || 1;
-                const matchPct = (player.matchPointsOnly / total) * 100;
-                const progPct = (player.prognosisPointsOnly / total) * 100;
-                const isMe = Number(player.id) === Number(currentUserId);
-
-                return (
-                  <div key={player.id} style={{ padding: "8px", borderRadius: "8px", backgroundColor: isMe ? "#eff6ff" : "transparent", borderLeft: isMe ? "4px solid #2563eb" : "4px solid transparent" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.88rem", marginBottom: "6px" }}>
-                      {renderPlayerWithAssets(player, isMe)}
-                      <span style={{ marginLeft: "auto", color: "#475569", fontWeight: "700" }}>{player.totalPoints} Gesamt-Pkt</span>
-                    </div>
-                    <div style={{ width: "100%", height: "16px", backgroundColor: "#f1f5f9", borderRadius: "4px", overflow: "hidden", display: "flex" }}>
-                      <div style={{ width: `${matchPct}%`, backgroundColor: "#2563eb", height: "100%", transition: "width 0.5s" }} title={`Tipps: ${player.matchPointsOnly} Pkt`} />
-                      <div style={{ width: `${progPct}%`, backgroundColor: "#7e22ce", height: "100%", transition: "width 0.5s" }} title={`Prognosen: ${player.prognosisPointsOnly} Pkt`} />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
         </div>
       )}
     </div>
