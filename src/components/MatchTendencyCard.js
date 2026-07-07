@@ -2,7 +2,7 @@ import React from "react";
 import { FlagIcon } from "../Utils/teamUtils";
 
 const MatchTendencyCard = ({ match, allCommunityTips, localPlayer, isMyPhase1Submitted }) => {
-  // 1. FILTER: Nur Tipps mit echten Tor-Eingaben berücksichtigen (filtert reine KO-Prognosen/Dummy-Reste heraus)
+  // 1. FILTER: Nur Tipps mit echten Tor-Eingaben berücksichtigen
   const matchTips = allCommunityTips.filter(t => 
     Number(t.match_id) === Number(match.id) &&
     t.goals_a !== null && t.goals_a !== undefined && t.goals_a !== '' &&
@@ -16,10 +16,9 @@ const MatchTendencyCard = ({ match, allCommunityTips, localPlayer, isMyPhase1Sub
   const winA = matchTips.filter(t => Number(t.goals_a) > Number(t.goals_b)).length;
   const winB = matchTips.filter(t => Number(t.goals_a) < Number(t.goals_b)).length;
 
-  // Split-Logik für Unentschieden in der KO-Runde vs. Gruppenphase
+  // Split-Logik für Unentschieden in der KO-Runde vs. Gruppenphase (mit robustem String-Cast)
   const drawA = isKoMatch ? matchTips.filter(t => Number(t.goals_a) === Number(t.goals_b) && String(t.winner) === "1").length : 0;
   const drawB = isKoMatch ? matchTips.filter(t => Number(t.goals_a) === Number(t.goals_b) && String(t.winner) === "2").length : 0;
-  // Ein reines Unentschieden gibt es nur in der Gruppe oder falls im KO kein Sieger gewählt wurde
   const pureDraw = matchTips.filter(t => Number(t.goals_a) === Number(t.goals_b) && (!isKoMatch || (!t.winner))).length;
 
   // Prozentanteile
@@ -40,7 +39,7 @@ const MatchTendencyCard = ({ match, allCommunityTips, localPlayer, isMyPhase1Sub
   }
 
   const myTip = matchTips.find(t => Number(t.player_id) === Number(localPlayer.id));
-  const hasRealResult = match.goals_a_real !== null && match.goals_b_real !== null && match.goals_a_real !== undefined && match.goals_b_real !== undefined && match.goals_a_real !== '';
+  const hasRealResult = match.goals_a_real !== null && match.goals_b_real !== null && match.goals_a_real !== undefined && match.goals_a_real !== '';
 
   // Reales Ergebnis & korrekte Tendenz ermitteln
   let correctTendency = null;
@@ -52,9 +51,16 @@ const MatchTendencyCard = ({ match, allCommunityTips, localPlayer, isMyPhase1Sub
     } else if (realA < realB) {
       correctTendency = "B";
     } else {
-      // Bei Remis im KO-Spiel entscheiden wir anhand des eingetragenen Gewinners (match.winner)
-      if (isKoMatch && match.winner) {
-        correctTendency = String(match.winner) === "1" ? "DrawA" : "DrawB";
+      // FIX: winner_real statt winner nutzen, da es sich um das reale Match-Objekt handelt!
+      if (isKoMatch && (match.winner_real !== null && match.winner_real !== undefined)) {
+        const matchW = String(match.winner_real).trim();
+        if (matchW === "1" || matchW === String(match.team_a) || (match.team_a_id && matchW === String(match.team_a_id))) {
+          correctTendency = "DrawA";
+        } else if (matchW === "2" || matchW === String(match.team_b) || (match.team_b_id && matchW === String(match.team_b_id))) {
+          correctTendency = "DrawB";
+        } else {
+          correctTendency = "Draw";
+        }
       } else {
         correctTendency = "Draw";
       }
@@ -72,7 +78,7 @@ const MatchTendencyCard = ({ match, allCommunityTips, localPlayer, isMyPhase1Sub
     if (realA === tipA && realB === tipB) {
       tipColor = "#eab308"; // Gold bei Volltreffer
     } else {
-      const tipTendency = tipA > tipB ? "A" : tipA < tipB ? "B" : (isKoMatch && myTip.winner === "1" ? "DrawA" : "DrawB");
+      const tipTendency = tipA > tipB ? "A" : tipA < tipB ? "B" : (isKoMatch && String(myTip.winner) === "1" ? "DrawA" : "DrawB");
       if (tipTendency === correctTendency || (!isKoMatch && tipA === tipB && correctTendency === "Draw")) {
         tipColor = "#2563eb"; // Blau bei richtiger Tendenz
       } else {
@@ -154,7 +160,7 @@ const MatchTendencyCard = ({ match, allCommunityTips, localPlayer, isMyPhase1Sub
               </div>
             )}
             
-            {/* 2. Unentschieden + Team A kommt weiter (Nur KO) */}
+            {/* 2. Unentschieden + Team A kommt weiter */}
             {drawA > 0 && (
               <div style={{ 
                 width: `${pctDrawA}%`, backgroundColor: "#86efac", display: "flex", alignItems: "center", justifyContent: "center", color: "#166534", fontSize: "0.75rem", fontWeight: "700",
@@ -166,7 +172,7 @@ const MatchTendencyCard = ({ match, allCommunityTips, localPlayer, isMyPhase1Sub
               </div>
             )}
 
-            {/* 3. Reines Unentschieden (Gruppe oder ohne KO-Winner) */}
+            {/* 3. Reines Unentschieden */}
             {pureDraw > 0 && (
               <div style={{ 
                 width: `${pctPureDraw}%`, backgroundColor: "#94a3b8", display: "flex", alignItems: "center", justifyContent: "center", color: "white", fontSize: "0.75rem", fontWeight: "700",
@@ -178,7 +184,7 @@ const MatchTendencyCard = ({ match, allCommunityTips, localPlayer, isMyPhase1Sub
               </div>
             )}
 
-            {/* 4. Unentschieden + Team B kommt weiter (Nur KO) */}
+            {/* 4. Unentschieden + Team B kommt weiter */}
             {drawB > 0 && (
               <div style={{ 
                 width: `${pctDrawB}%`, backgroundColor: "#c084fc", display: "flex", alignItems: "center", justifyContent: "center", color: "#581c87", fontSize: "0.75rem", fontWeight: "700",
@@ -212,7 +218,7 @@ const MatchTendencyCard = ({ match, allCommunityTips, localPlayer, isMyPhase1Sub
             {myTip ? `${myTip.goals_a} : ${myTip.goals_b}` : "—"}
             {isKoMatch && myTip && Number(myTip.goals_a) === Number(myTip.goals_b) && (
               <span style={{ fontSize: "0.75rem", fontWeight: "600", color: "#64748b" }}>
-                {" "}(weiter: {myTip.winner === "1" ? match.team_a : match.team_b})
+                {" "}(weiter: {String(myTip.winner) === "1" ? match.team_a : match.team_b})
               </span>
             )}
           </span>

@@ -467,12 +467,12 @@ function TippsPage({ player, phaseId }) {
               <div style={TIPPS_PAGE_STYLES.bannerLocked}>🔒 Phase gesperrt</div>
             ) : (phase?.id === 5 ? completionStatus.currentM !== completionStatus.targetM : !completionStatus.isReady) ? (
               <div style={TIPPS_PAGE_STYLES.bannerError}>
-                ❌ Abgabe gesperrt: {
+                ❌ Abgabe noch nicht möglich, es müssen noch Spiele getippt werden: {
                   completionStatus.groupRanksMissing ? "Es fehlen noch Stichwahlen in den Tabellen!" :
                   completionStatus.thirdsRanksMissing ? "Kritischer Gleichstand bei Gruppendritten (Platz 8 vs 9) benötigt Stichwahl!" :
                   numericPhaseId === 5 
                     ? `${completionStatus.currentM}/${completionStatus.targetM} Spiele getippt`
-                    : `${completionStatus.currentM}/${completionStatus.targetM} Spiele gesichert & ${completionStatus.currentP}/${completionStatus.targetP} Prognosen`
+                    : `${completionStatus.currentM}/${completionStatus.targetM} Spiele getippt & ${completionStatus.currentP}/${completionStatus.targetP} Prognosen getippt`
                 }
               </div>
             ) : (

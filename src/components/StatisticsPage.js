@@ -40,6 +40,9 @@ const StatisticsPage = ({
   const stats = useMemo(() => {
     if (!players.length) return null;
 
+    // Helper-Funktion gegen JS-Fließkomma-Fehler (Runden auf 1 Nachkommastelle)
+    const round1D = (num) => Math.round(num * 10) / 10;
+
     // 0. Spiele-Map & alle verfügbaren Gruppen dynamisch aus der Matches-Prop ermitteln
     const matchMap = new Map();
     const uniqueGroupsSet = new Set();
@@ -220,6 +223,30 @@ const StatisticsPage = ({
       }
     });
 
+    // --- CRITICAL FIX: Hier werden alle akkumulierten Werte glatt auf 1 Nachkommastelle gerundet ---
+    Object.values(playerStatsMap).forEach(p => {
+      p.totalPoints = round1D(p.totalPoints);
+      p.matchPointsOnly = round1D(p.matchPointsOnly);
+      p.prognosisPointsOnly = round1D(p.prognosisPointsOnly);
+      
+      Object.keys(p.pointsPerPhase).forEach(k => { p.pointsPerPhase[k] = round1D(p.pointsPerPhase[k]); });
+      Object.keys(p.prognosisPointsPerPhase).forEach(k => { p.prognosisPointsPerPhase[k] = round1D(p.prognosisPointsPerPhase[k]); });
+      Object.keys(p.visualPrognosisPointsPerPhase).forEach(k => { p.visualPrognosisPointsPerPhase[k] = round1D(p.visualPrognosisPointsPerPhase[k]); });
+      Object.keys(p.pointsPerMatchday).forEach(k => { p.pointsPerMatchday[k] = round1D(p.pointsPerMatchday[k]); });
+      
+      Object.keys(p.stagePoints.groups).forEach(g => {
+        p.stagePoints.groups[g].tips = round1D(p.stagePoints.groups[g].tips);
+        p.stagePoints.groups[g].prognosis = round1D(p.stagePoints.groups[g].prognosis);
+        p.stagePoints.groups[g].total = round1D(p.stagePoints.groups[g].total);
+      });
+      
+      ["r32", "r16", "qf", "sf", "f"].forEach(stage => {
+        p.stagePoints[stage].tips = round1D(p.stagePoints[stage].tips);
+        p.stagePoints[stage].prognosis = round1D(p.stagePoints[stage].prognosis);
+        p.stagePoints[stage].total = round1D(p.stagePoints[stage].total);
+      });
+    });
+
     const allStatsList = Object.values(playerStatsMap);
     const phaseEndMatchday = { 1: 3, 2: 4, 3: 5, 4: 6, 5: 7 };
 
@@ -260,7 +287,12 @@ const StatisticsPage = ({
             accumulatedPointsAtMilestone += p.prognosisPointsPerPhase[phaseId];
           }
         });
-        return { id: p.id, pointsOnThisDay: p.pointsPerMatchday[day] || 0, totalAtMilestone: accumulatedPointsAtMilestone };
+        // Auch hier beim Zusammenbauen des Zeitverlaufs Fließkomma-Fehler direkt runden
+        return { 
+          id: p.id, 
+          pointsOnThisDay: round1D(p.pointsPerMatchday[day] || 0), 
+          totalAtMilestone: round1D(accumulatedPointsAtMilestone) 
+        };
       });
 
       dayStandings.sort((a, b) => b.totalAtMilestone - a.totalAtMilestone);
@@ -319,8 +351,10 @@ const StatisticsPage = ({
     });
 
     const myStats = playerStatsMap[currentUserId] || null;
-    const avgPerfectHits = allStatsList.reduce((sum, p) => sum + p.perfectHits, 0) / allStatsList.length;
-    const avgMatchPoints = allStatsList.reduce((sum, p) => sum + p.matchPointsOnly, 0) / allStatsList.length;
+    
+    // Durchschnitte am Ende sauber runden
+    const avgPerfectHits = round1D(allStatsList.reduce((sum, p) => sum + p.perfectHits, 0) / allStatsList.length);
+    const avgMatchPoints = round1D(allStatsList.reduce((sum, p) => sum + p.matchPointsOnly, 0) / allStatsList.length);
 
     return {
       rankingReal,

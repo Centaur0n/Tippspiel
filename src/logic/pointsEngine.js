@@ -43,13 +43,22 @@ export const POINTS_CONFIG = {
 
   BONUS_QUESTION_BASE: 20, 
 
-  // Die mathematische Bremse für späte Phasen
+  // Die mathematische Bremse für späte Phasen (Prognosen)
   DIVISORS: {
     1: 1.0, 
     2: 1.5, 
     3: 2.0, 
     4: 3.0, 
     5: 4.0
+  },
+
+  // NEU: Multiplikations-Faktoren für Live-Tipps in späteren Phasen
+  TIP_FACTORS: {
+    1: 1.0,
+    2: 1.25,
+    3: 1.5,
+    4: 1.75,
+    5: 2.0
   }
 };
 
@@ -88,10 +97,10 @@ export const calculateBonusPoints = (qId, userAnswer, realAnswer, basePoints = 2
   const userStr = String(userAnswer).trim().toLowerCase();
   const realStr = String(realAnswer).trim().toLowerCase();
 
-  // NEU: Am Komma splitten, um Mehrfach-Antworten der Admins zu unterstützen (z.B. "kroatien, kanada")
+  // Am Komma splitten, um Mehrfach-Antworten der Admins zu unterstützen (z.B. "kroatien, kanada")
   const realAnswersArray = realStr.split(",").map(item => item.trim()).filter(Boolean);
 
-  // NEU: Prüfen, ob die Antwort des Users in der Liste der richtigen Antworten existiert
+  // Prüfen, ob die Antwort des Users in der Liste der richtigen Antworten existiert
   if (realAnswersArray.includes(userStr)) return basePoints;
 
   const partialPointsQuestions = ["total_goals", "extra_times", "own_goals"];
@@ -110,7 +119,7 @@ export const calculateBonusPoints = (qId, userAnswer, realAnswer, basePoints = 2
 };
 
 // --- HELPER: BERECHNET DIE PUNKTE FÜR EINEN EINZELNEN TIPP ---
-export const calculateDetailedMatchPoints = (tip, actual, winnerPoints) => {
+export const calculateDetailedMatchPoints = (tip, actual, winnerPoints, phaseId = 1) => {
   const points = { winner: 0, diff: 0, goals_a: 0, goals_b: 0, sum: 0, exact_bonus: 0, one_goal_off: 0 };
   if (!tip || actual.goals_a === null || actual.goals_a === undefined) return { total: 0, breakdown: {} };
 
@@ -146,34 +155,44 @@ export const calculateDetailedMatchPoints = (tip, actual, winnerPoints) => {
     }
   }
 
-  const total = Object.values(points).reduce((acc, val) => acc + val, 0);
-  
-  // Der "Knapp daneben"-Punkt zählt laut Wunsch als Bonus-Kategorie
-  const totalBonusDisplay = points.exact_bonus + points.one_goal_off;
+  // --- PHASEN-FAKTOR UND ABROUND-LOGIK ANWENDEN ---
+  const factor = POINTS_CONFIG.TIP_FACTORS[phaseId] || 1.0;
+
+  // Helferfunktion zum Runterrunden auf eine Nachkommastelle
+  const roundDownToOneDecimal = (val) => Math.floor(val * 10) / 10;
+
+  // Tendenz-Punkte (winner) bleiben unverändert (Faktor 1.0)
+  const pWinner = points.winner;
+
+  // Alle anderen Detailpunkte werden multipliziert und abgerundet
+  const pDiff = roundDownToOneDecimal(points.diff * factor);
+  const pGoals = roundDownToOneDecimal((points.goals_a + points.goals_b) * factor);
+  const pSum = roundDownToOneDecimal(points.sum * factor);
+  const pBonus = roundDownToOneDecimal((points.exact_bonus + points.one_goal_off) * factor);
+
+  // Gesamtsumme ermitteln und final abrunden
+  const total = roundDownToOneDecimal(pWinner + pDiff + pGoals + pSum + pBonus);
   
   return { 
     total, 
     breakdown: {
-      descr: `Tendenz: ${points.winner}, Diff: ${points.diff}, Tore: ${points.goals_a + points.goals_b}, Summe: ${points.sum}, Bonus: ${totalBonusDisplay}`,
+      descr: `Tendenz: ${pWinner}, Diff: ${pDiff}, Tore: ${pGoals}, Summe: ${pSum}, Bonus: ${pBonus}${factor > 1 ? ` (Faktor x${factor})` : ''}`,
       tip: `${tA}:${tB}`, real: `${aA}:${aB}`, tip_a: tA, tip_b: tB, real_a: aA, real_b: aB,
-      points_winner: points.winner, points_exact: totalBonusDisplay, sum_points: total
+      points_winner: pWinner, points_exact: pBonus, sum_points: total
     } 
   };
 };
 
 // --- HELPER: DYNAMISCHE TENDENZ-PUNKTE ---
 export const getDynamicWinnerPoints = (rankA, rankB, actualWinner) => {
-  // Wenn Unentschieden, Standard-Punkte (4)
   if (actualWinner === "0") return 4;
 
   const diff = rankA - rankB; 
 
   if (actualWinner === "1") {
-    // Team A hat gewonnen. War Team A der Außenseiter? (z.B. Rang 80 vs Rang 5 -> diff = 75)
-    if (diff > 20) return 5;  // Außenseiter-Sieg bringt mehr Punkte
-    if (diff < -20) return 3; // Favoriten-Sieg bringt weniger Punkte
+    if (diff > 20) return 5;  
+    if (diff < -20) return 3; 
   } else if (actualWinner === "2") {
-    // Team B hat gewonnen. War Team B der Außenseiter? (z.B. Rang 5 vs Rang 80 -> diff = -75)
     if (diff < -20) return 5; 
     if (diff > 20) return 3;
   }
@@ -254,44 +273,64 @@ export function createPointEntry(playerId, category, points, team, phase, groupN
   } else if (category === "PROGNOSIS_PATH") {
     const originalPoints = extra.original || points;
 
-    switch (originalPoints) {
-      case POINTS_CONFIG.PROG_REACH_16:
+    let detectionKey = extra.type;
+
+    if (!detectionKey) {
+      if (originalPoints === 6) {
+        detectionKey = (groupName && groupName !== "KO") ? "PROG_OUT_VORRUNDE" : "PROG_REACH_8";
+      } else if (originalPoints === 24) {
+        const is3rdPlace = extra.roundName?.toLowerCase().includes("platz 3") || groupName?.toLowerCase().includes("platz 3");
+        detectionKey = is3rdPlace ? "PROG_PLACE_3" : "PROG_REACH_2";
+      }
+    }
+
+    switch (detectionKey || originalPoints) {
+      case "PROG_REACH_16":
+      case POINTS_CONFIG.PROG_REACH_16: 
         detailDesc = `${team} erreicht das Sechzehntelfinale`;
         break;
-      case POINTS_CONFIG.PROG_OUT_VORRUNDE:
+      case "PROG_OUT_VORRUNDE":
         detailDesc = `${team} scheidet in der Vorrunde aus`;
         break;
-      case POINTS_CONFIG.PROG_OUT_16:
+      case "PROG_OUT_16":
+      case POINTS_CONFIG.PROG_OUT_16: 
         detailDesc = `${team} scheidet in der Runde der 32 aus`;
         break;
-      case POINTS_CONFIG.PROG_REACH_8:
+      case "PROG_REACH_8":
         detailDesc = `${team} erreicht das Achtelfinale`;
         break;
-      case POINTS_CONFIG.PROG_OUT_8:
+      case "PROG_OUT_8":
+      case POINTS_CONFIG.PROG_OUT_8: 
         detailDesc = `${team} scheidet im Achtelfinale aus`;
         break;
-      case POINTS_CONFIG.PROG_REACH_4:
+      case "PROG_REACH_4":
+      case POINTS_CONFIG.PROG_REACH_4: 
         detailDesc = `${team} erreicht das Viertelfinale`;
         break;
-      case POINTS_CONFIG.PROG_OUT_4:
+      case "PROG_OUT_4":
+      case POINTS_CONFIG.PROG_OUT_4: 
         detailDesc = `${team} scheidet im Viertelfinale aus`;
         break;
-      case POINTS_CONFIG.PROG_REACH_2:
+      case "PROG_REACH_2":
         detailDesc = `${team} erreicht das Halbfinale`;
         break;
-      case POINTS_CONFIG.PROG_PLACE_4:
+      case "PROG_PLACE_4":
+      case POINTS_CONFIG.PROG_PLACE_4: 
         detailDesc = `${team} beendet das Turnier auf Platz 4`;
         break;
-      case POINTS_CONFIG.PROG_PLACE_3:
+      case "PROG_PLACE_3":
         detailDesc = `${team} holt Platz 3`;
         break;
-      case POINTS_CONFIG.PROG_REACH_FINAL:
+      case "PROG_REACH_FINAL":
+      case POINTS_CONFIG.PROG_REACH_FINAL: 
         detailDesc = `${team} erreicht das Finale`;
         break;
-      case POINTS_CONFIG.PROG_VIZE:
+      case "PROG_VIZE":
+      case POINTS_CONFIG.PROG_VIZE: 
         detailDesc = `${team} ist Vize-Meister`;
         break;
-      case POINTS_CONFIG.PROG_CHAMPION:
+      case "PROG_CHAMPION":
+      case POINTS_CONFIG.PROG_CHAMPION: 
         detailDesc = `${team} ist Turniersieger 🎉`;
         break;
       default:

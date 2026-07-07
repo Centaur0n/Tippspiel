@@ -199,7 +199,7 @@ export async function processStandardMatchTips(currentMatch, phaseId) {
       return;
     }
 
-    const { total, breakdown } = calculateDetailedMatchPoints(activeTip, actualResults, winnerPoints);
+    const { total, breakdown } = calculateDetailedMatchPoints(activeTip, actualResults, winnerPoints, phaseId);
     console.log(`[DEBUG-MATCH-TIPS] Spieler #${pId} erhält für Match #${mId}: Total ${total} Punkte. (${breakdown.descr})`);
 
     pointsEntries.push({
