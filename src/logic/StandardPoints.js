@@ -114,7 +114,7 @@ export async function processStandardMatchTips(currentMatch, phaseId) {
         const sh2 = hf2Tip.winner === "1" ? hf2.team_a : hf2.team_b;
         const vh2 = hf2Tip.winner === "1" ? hf2.team_b : hf2.team_a;
 
-        const isFinal = currentMatch.group_name === "Finale" || currentMatch.match_order === 79;
+        const isFinal = currentMatch.group_name === "Finale" || currentMatch.match_order === 104;
 
         const isStandardMatch = isFinal 
           ? ((currentMatch.team_a === sh1 && currentMatch.team_b === sh2) || (currentMatch.team_a === sh2 && currentMatch.team_b === sh1))
@@ -137,8 +137,8 @@ export async function processStandardMatchTips(currentMatch, phaseId) {
         } else {
           // 1. Robuste Typbestimmung des aktuellen Echtzeit-Spiels
           const groupNameClean = (currentMatch.group_name || "").toLowerCase().trim();
-          const isReallyFinale = groupNameClean === "finale" || currentMatch.match_order === 79;
-          const isReallyPlatz3 = groupNameClean.includes("platz 3") || currentMatch.match_order === 78;
+          const isReallyFinale = groupNameClean === "finale" || currentMatch.match_order === 104;
+          const isReallyPlatz3 = groupNameClean.includes("platz 3") || currentMatch.match_order === 103;
 
           const matrixDefinitions = {
             "OPT2_F":  { teamA: sh1, teamB: vh2 },
