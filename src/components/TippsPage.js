@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef, useMemo } from "react";
 import { supabase } from "../supabaseClient";
 import { getBestThirds } from "../Utils/calcTable";
 
-// --- KONSTANTEN & STYLES ---
+// --- KONSTANTEN & STYLES --- 
 import { 
   UI_STYLES, KO_STRUCTURE, ROUND_NAMES, 
   PHASE_SPACING, PHASE_HEIGHTS, TIPPS_PAGE_STYLES
